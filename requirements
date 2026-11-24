@@ -1,8 +1,8 @@
 streamlit
 pandas
-plotly
 numpy
-python-dotenv
-groq
-openpyxl
+plotly
 scikit-learn
+groq
+python-dotenv 
+openpyxl
