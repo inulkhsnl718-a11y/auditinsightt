@@ -102,7 +102,7 @@ def to_excel_bytes(df_export, sheet_name="Hasil_Audit"):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=3):
+def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=5):
     client = genai.Client(api_key=api_key)
     contents = []
     for m in messages:
@@ -114,27 +114,70 @@ def get_gemini_response(api_key, model_name, system_instruction, messages, max_r
             )
         )
 
+    fallback_models = [model_name, "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
+    models_to_try = []
+    for m_name in fallback_models:
+        if m_name not in models_to_try:
+            models_to_try.append(m_name)
+
     last_error = None
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system_instruction,
-                    temperature=0.3,
-                    max_output_tokens=1600
+    for current_model in models_to_try:
+        for attempt in range(max_retries):
+            try:
+                response = client.models.generate_content(
+                    model=current_model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.3,
+                        max_output_tokens=1600
+                    )
                 )
-            )
-            return response.text or "Tidak ada respons teks yang dihasilkan oleh Gemini."
-        except Exception as e:
-            last_error = e
-            err_str = str(e)
-            is_temporary = ("503" in err_str) or ("UNAVAILABLE" in err_str) or ("429" in err_str)
-            if is_temporary and attempt < max_retries - 1:
-                time.sleep(2 * (attempt + 1))
-                continue
-            raise last_error
+                return response.text or "Tidak ada respons teks yang dihasilkan oleh Gemini."
+            except Exception as e:
+                last_error = e
+                err_str = str(e)
+                is_temporary = ("503" in err_str) or ("UNAVAILABLE" in err_str) or ("429" in err_str)
+                is_not_found = ("404" in err_str) or ("NOT_FOUND" in err_str)
+                if is_not_found:
+                    break
+                if is_temporary and attempt < max_retries - 1:
+                    time.sleep(min(2 ** (attempt + 1), 16))
+                    continue
+                break
+    raise last_error
+
+def get_preset_audit_answer(question_key, mode_name, ai_context_summary, top_str):
+    header = f"**Analisis Terarah ({mode_name})**\n\n- **Ringkasan Data:** {ai_context_summary}\n\n"
+    if question_key == "Ringkasan Temuan Utama & Penyebab Non-Fraud":
+        return (
+            header
+            + "1. **Indikasi Risiko / Anomali Utama:** Fokuskan pemeriksaan pada baris dengan skor risiko tertinggi dan nilai/perubahan paling mencolok pada cuplikan prioritas di bawah.\n"
+            + "2. **Kemungkinan Penyebab Non-Fraud:** Kesalahan input/format angka, klasifikasi akun atau pos yang kurang tepat, perbedaan waktu pencatatan (*cut-off*), atau kondisi operasional yang memang sah.\n"
+            + "3. **Prosedur Audit Lanjutan:** Bandingkan baris prioritas dengan dokumen pendukung asli, konfirmasi ke unit/bagian terkait, lalu catat hasil verifikasi pada kolom *Keputusan Auditor* di kertas kerja Excel.\n\n"
+            + f"```\n{top_str}\n```"
+        )
+    elif question_key == "Prosedur Verifikasi Dokumen & Bukti Pendukung":
+        return (
+            header
+            + "1. **Uji Keberadaan & Keterjadian:** Telusuri transaksi/akun berisiko tinggi ke dokumen sumber (faktur, kuitansi, kontrak, berita acara, atau bukti persetujuan).\n"
+            + "2. **Uji Kewajaran & Otorisasi:** Pastikan transaksi/realisasi disetujui oleh pihak berwenang sesuai batas wewenang dan tidak terpecah-pecah tanpa dasar yang jelas.\n"
+            + "3. **Dokumentasi Kertas Kerja:** Cantumkan nomor bukti yang diperiksa serta status temuan (wajar, salah saji/koreksi, atau perlu klarifikasi lanjutan)."
+        )
+    elif question_key == "Prioritas Tindak Lanjut Auditor":
+        return (
+            header
+            + "1. **Prioritas 1 (Risiko Tinggi / Melampaui Batas):** Periksa lebih dulu baris dengan skor tertinggi, nilai terbesar, atau penyimpangan paling tajam.\n"
+            + "2. **Prioritas 2 (Risiko Sedang / Perlu Perhatian):** Tinjau pola berulang, nominal bulat, atau akun dengan perubahan signifikan.\n"
+            + "3. **Prioritas 3 (Risiko Rendah / Wajar):** Lakukan *sampling* ringan atau cukup pantau bila ada perubahan parameter aturan di *sidebar*."
+        )
+    else:
+        return (
+            header
+            + "1. **Cek Kesalahan Teknis:** Pastikan pemetaan kolom sudah sesuai dengan struktur Excel dan pembersihan angka (`clean_currency`) membaca format ribuan/desimal dengan benar.\n"
+            + "2. **Cek Kebijakan & Klasifikasi:** Verifikasi apakah terdapat reklasifikasi akun, perubahan anggaran/pagu, atau transaksi musiman yang memengaruhi hasil.\n"
+            + "3. **Kesimpulan Sementara:** Perlakukan setiap *red flag* sebagai indikator pemeriksaan awal sebelum menarik kesimpulan audit."
+        )
 
 def auto_match_col(columns, keywords):
     for col in columns:
@@ -485,7 +528,7 @@ if uploaded_file is not None:
             k4.metric("Nilai Risiko Tinggi", f"Rp {high_df['Jumlah_Clean'].sum():,.0f}")
 
             st.divider()
-            t1, t2, t3, t4 = st.tabs(["📊 Grafik", "📋 Tabel Temuan", "🤖 Analisis & Chat AI", "📥 Unduh Excel"])
+            t1, t2, t3, t4 = st.tabs(["📊 Grafik", "📋 Tabel Temuan", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
                 g1, g2 = st.columns(2)
@@ -544,7 +587,7 @@ if uploaded_file is not None:
                 k4.metric("Perubahan Rata-Rata (%)", f"{df_fs['Perubahan_%'].mean():+.1f}%")
 
             st.divider()
-            t1, t2, t3, t4 = st.tabs(["📊 Grafik & Struktur", "📋 Tabel Akun", "🤖 Analisis & Chat AI", "📥 Unduh Excel"])
+            t1, t2, t3, t4 = st.tabs(["📊 Grafik & Struktur", "📋 Tabel Akun", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
                 st.plotly_chart(px.bar(df_fs.head(15), x=col_akun, y=['Nilai_Kini', 'Nilai_Lalu'], barmode='group', title="Top 15 Akun: Periode Berjalan vs Periode Lalu"), use_container_width=True)
@@ -585,7 +628,7 @@ if uploaded_file is not None:
             k4.metric("Pos Melampaui Pagu", f"{len(over_df):,}")
 
             st.divider()
-            t1, t2, t3, t4 = st.tabs(["📊 Grafik Penyerapan", "📋 Tabel Anggaran", "🤖 Analisis & Chat AI", "📥 Unduh Excel"])
+            t1, t2, t3, t4 = st.tabs(["📊 Grafik Penyerapan", "📋 Tabel Anggaran", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
                 st.plotly_chart(px.bar(df_bud.head(15), x=col_pos, y='Penyerapan_%', color='Level Risiko', title="Persentase Penyerapan Anggaran (Top 15)"), use_container_width=True)
@@ -605,14 +648,30 @@ if uploaded_file is not None:
                 st.download_button("📥 Unduh Hasil Anggaran (.xlsx)", data=to_excel_bytes(exp_bud, "Anggaran_Realisasi"), file_name=f"AuditInsight_Anggaran_{uploaded_file.name}")
 
         # --------------------------------------
-        # TAB ANALISIS & CHAT AI (GEMINI)
+        # TAB ANALISIS & PILIHAN TANYA JAWAB
         # --------------------------------------
         with t3:
-            st.subheader("Asisten Penjelasan Temuan Audit (Gemini AI)")
-            if not gemini_api_key:
-                st.warning("Masukkan Gemini API Key di sidebar kiri (atau di Streamlit Secrets `GEMINI_API_KEY`) untuk mengaktifkan ringkasan dan chat AI.")
-            else:
-                system_prompt = f"""Anda adalah asisten auditor profesional untuk aplikasi AuditInsight.
+            st.subheader("Asisten Penjelasan Temuan Audit")
+            preset_questions = [
+                "Ringkasan Temuan Utama & Penyebab Non-Fraud",
+                "Prosedur Verifikasi Dokumen & Bukti Pendukung",
+                "Prioritas Tindak Lanjut Auditor",
+                "Evaluasi Kemungkinan Kesalahan Pencatatan / Klasifikasi"
+            ]
+
+            selected_q = st.selectbox(
+                "Pilih pertanyaan audit yang ingin dibahas:",
+                options=preset_questions,
+                index=0
+            )
+
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                ask_gemini_btn = st.button("✨ Jawab dengan Gemini AI", type="primary", use_container_width=True)
+            with col_btn2:
+                ask_instant_btn = st.button("📋 Tampilkan Panduan Instan (Tanpa API)", use_container_width=True)
+
+            system_prompt = f"""Anda adalah asisten auditor profesional untuk aplikasi AuditInsight.
 Prinsip wajib:
 1. Gunakan istilah 'indikasi risiko', 'anomali', atau 'red flag'. Jangan menyimpulkan kecurangan/fraud secara pasti.
 2. Jelaskan temuan berdasarkan data yang dihitung kode, sertakan kemungkinan penyebab non-fraud (kesalahan pencatatan, klasifikasi akun, atau kondisi operasional), dan beri prosedur audit lanjutan.
@@ -623,44 +682,37 @@ Prinsip wajib:
 Cuplikan 15 Baris Prioritas:
 {top_str}
 """
-                if st.button("✨ Buat Ringkasan Temuan AI", type="primary"):
-                    with st.spinner("Gemini sedang menganalisis temuan..."):
+
+            if ask_instant_btn:
+                st.session_state["preset_answer"] = get_preset_audit_answer(
+                    selected_q, mode, ai_context_summary, top_str
+                )
+
+            if ask_gemini_btn:
+                if not gemini_api_key:
+                    st.warning("Gemini API Key belum diisi. Menampilkan panduan terstruktur dari data yang dianalisis:")
+                    st.session_state["preset_answer"] = get_preset_audit_answer(
+                        selected_q, mode, ai_context_summary, top_str
+                    )
+                else:
+                    with st.spinner("Menyiapkan jawaban untuk pertanyaan terpilih..."):
                         try:
                             resp = get_gemini_response(
-                                gemini_api_key, model_choice, system_prompt,
-                                [{"role": "user", "content": "Ringkas temuan utama, kemungkinan penyebab non-fraud, dan langkah audit lanjutan."}]
+                                gemini_api_key,
+                                model_choice,
+                                system_prompt,
+                                [{"role": "user", "content": f"Jawab pertanyaan audit berikut secara ringkas, jelas, dan terstruktur: {selected_q}"}]
                             )
-                            st.session_state['ai_multi_summary'] = resp
+                            st.session_state["preset_answer"] = resp
                         except Exception as e:
-                            st.error(f"Error Gemini API: {e}")
+                            st.warning(f"Gemini sedang sibuk ({e}). Menampilkan jawaban terstruktur otomatis:")
+                            st.session_state["preset_answer"] = get_preset_audit_answer(
+                                selected_q, mode, ai_context_summary, top_str
+                            )
 
-                if 'ai_multi_summary' in st.session_state:
-                    st.markdown(st.session_state['ai_multi_summary'])
-
+            if "preset_answer" in st.session_state:
                 st.divider()
-                if "multi_chat" not in st.session_state:
-                    st.session_state.multi_chat = []
-
-                for m in st.session_state.multi_chat:
-                    with st.chat_message(m["role"]):
-                        st.markdown(m["content"])
-
-                q = st.chat_input("Tanyakan detail temuan pada data yang baru dianalisis...")
-                if q:
-                    st.session_state.multi_chat.append({"role": "user", "content": q})
-                    with st.chat_message("user"):
-                        st.markdown(q)
-                    with st.chat_message("assistant"):
-                        with st.spinner("Gemini sedang menyusun jawaban..."):
-                            try:
-                                ans = get_gemini_response(
-                                    gemini_api_key, model_choice, system_prompt,
-                                    st.session_state.multi_chat
-                                )
-                                st.markdown(ans)
-                                st.session_state.multi_chat.append({"role": "assistant", "content": ans})
-                            except Exception as e:
-                                st.error(f"Error: {e}")
+                st.markdown(st.session_state["preset_answer"])
 
     except Exception as e:
         st.error(f"Terjadi kesalahan saat membaca file: {e}")
