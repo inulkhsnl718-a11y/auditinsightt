@@ -1,385 +1,589 @@
-import os
-from difflib import SequenceMatcher
-from io import BytesIO
-
-import numpy as np
+import streamlit as st
 import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
 import plotly.express as px
 import plotly.graph_objects as go
-import streamlit as st
-from dotenv import load_dotenv
+from difflib import SequenceMatcher
+from io import BytesIO
+import os
 from groq import Groq
-from sklearn.ensemble import IsolationForest
 
-# ------------------------------------------------------------------
-# Konfigurasi halaman (harus perintah Streamlit pertama)
-# ------------------------------------------------------------------
-st.set_page_config(page_title="AuditLens", page_icon="🔍", layout="wide")
-
-# ------------------------------------------------------------------
-# Load API key secara aman (.env atau Streamlit Secrets)
-# ------------------------------------------------------------------
-load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-if not GROQ_API_KEY:
-    try:
-        GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
-    except Exception:
-        GROQ_API_KEY = None
-
-if not GROQ_API_KEY:
-    st.error("🚨 API Key tidak ditemukan! Isi di Streamlit Secrets atau file .env.")
-    st.stop()
-
-client = Groq(api_key=GROQ_API_KEY)
-
-# ------------------------------------------------------------------
-# Definisi aturan red flag: nama -> (bobot skor, penjelasan)
-# ------------------------------------------------------------------
-RULES = {
-    "Duplikat persis": (40, "Vendor, nomor faktur, dan nominal sama persis (indikasi pembayaran ganda)"),
-    "Duplikat nominal ≤7 hari": (20, "Vendor dan nominal sama dalam 7 hari dengan faktur berbeda"),
-    "Nominal bulat": (10, "Nominal kelipatan bulat (indikasi estimasi, bukan transaksi riil)"),
-    "Transaksi akhir pekan": (10, "Transaksi pada Sabtu/Minggu"),
-    "Mendekati batas otorisasi": (15, "Nominal 90-100% dari batas persetujuan"),
-    "Indikasi pemecahan transaksi": (25, "Beberapa transaksi vendor sama di hari sama, total melewati batas otorisasi"),
-    "Self-approval": (30, "Pembuat dan penyetuju transaksi adalah orang yang sama"),
-    "Outlier statistik": (15, "Pola nominal/waktu menyimpang (Isolation Forest)"),
-    "Nama vendor mirip": (20, "Nama vendor sangat mirip dengan vendor lain (indikasi vendor fiktif/duplikat)"),
-    "Vendor sekali pakai bernilai besar": (15, "Vendor hanya muncul sekali dengan nominal di 10% teratas"),
-    "NPWP vendor kosong": (15, "Data NPWP vendor tidak tersedia"),
-}
-
-REQUIRED_COLUMNS = ["Tanggal", "Vendor", "No Faktur", "Jumlah"]
-OPTIONAL_COLUMNS = ["Dibuat Oleh", "Disetujui Oleh", "NPWP Vendor"]
-
-
-# ------------------------------------------------------------------
-# Fungsi analisis (semua angka dihitung oleh kode, BUKAN oleh LLM)
-# ------------------------------------------------------------------
-def load_data(file) -> pd.DataFrame:
-    df = pd.read_excel(file)
-    df["Baris Excel"] = df.index + 2  # jejak audit: baris asli di file
-    df["Tanggal"] = pd.to_datetime(df["Tanggal"], errors="coerce")
-    df["Jumlah"] = pd.to_numeric(df["Jumlah"], errors="coerce")
-    df = df.dropna(subset=["Tanggal", "Jumlah"]).reset_index(drop=True)
-    df["Vendor"] = df["Vendor"].astype(str).str.strip()
-    df["No Faktur"] = df["No Faktur"].astype(str).str.strip()
-    return df
-
-
-def run_rules(df: pd.DataFrame, approval_limit: float, round_unit: float, contamination: float) -> pd.DataFrame:
-    flags = pd.DataFrame(False, index=df.index, columns=list(RULES.keys()))
-
-    # 1. Duplikat persis
-    flags["Duplikat persis"] = df.duplicated(["Vendor", "No Faktur", "Jumlah"], keep=False)
-
-    # 2. Duplikat nominal dalam 7 hari (faktur berbeda)
-    for _, g in df.groupby(["Vendor", "Jumlah"]):
-        if len(g) > 1:
-            g = g.sort_values("Tanggal")
-            gap_prev = g["Tanggal"].diff().dt.days
-            gap_next = -g["Tanggal"].diff(-1).dt.days
-            hit = (gap_prev <= 7) | (gap_next <= 7)
-            flags.loc[g.index[hit.values], "Duplikat nominal ≤7 hari"] = True
-
-    # 3. Nominal bulat
-    flags["Nominal bulat"] = (df["Jumlah"] >= round_unit) & (df["Jumlah"] % round_unit == 0)
-
-    # 4. Akhir pekan
-    flags["Transaksi akhir pekan"] = df["Tanggal"].dt.dayofweek >= 5
-
-    # 5. Mendekati batas otorisasi
-    flags["Mendekati batas otorisasi"] = (df["Jumlah"] >= 0.9 * approval_limit) & (df["Jumlah"] <= approval_limit)
-
-    # 6. Pemecahan transaksi (split) per vendor per hari
-    grp = df.groupby(["Vendor", df["Tanggal"].dt.date])["Jumlah"]
-    total_hari = grp.transform("sum")
-    jumlah_trx = grp.transform("count")
-    flags["Indikasi pemecahan transaksi"] = (
-        (jumlah_trx > 1) & (total_hari > approval_limit) & (df["Jumlah"] <= approval_limit)
-    )
-
-    # 7. Self-approval
-    if "Dibuat Oleh" in df.columns and "Disetujui Oleh" in df.columns:
-        same = df["Dibuat Oleh"].astype(str).str.strip().str.lower() == df["Disetujui Oleh"].astype(str).str.strip().str.lower()
-        flags["Self-approval"] = same & df["Dibuat Oleh"].notna()
-
-    # 8. Outlier statistik (Isolation Forest) - butuh data cukup
-    if len(df) >= 30:
-        fitur = pd.DataFrame(
-            {
-                "log_jumlah": np.log1p(df["Jumlah"].clip(lower=0)),
-                "hari_dlm_bulan": df["Tanggal"].dt.day,
-                "hari_dlm_minggu": df["Tanggal"].dt.dayofweek,
-            }
-        )
-        model = IsolationForest(contamination=contamination, random_state=42)
-        flags["Outlier statistik"] = model.fit_predict(fitur) == -1
-
-    # 9. Nama vendor mirip (indikasi vendor fiktif / duplikat master data)
-    vendors = df["Vendor"].unique().tolist()
-    mirip = set()
-    for i in range(len(vendors)):
-        for j in range(i + 1, len(vendors)):
-            a, b = vendors[i].lower(), vendors[j].lower()
-            if SequenceMatcher(None, a, b).ratio() >= 0.88:
-                mirip.update([vendors[i], vendors[j]])
-    flags["Nama vendor mirip"] = df["Vendor"].isin(mirip)
-
-    # 10. Vendor sekali pakai dengan nominal besar
-    freq = df["Vendor"].map(df["Vendor"].value_counts())
-    batas_besar = df["Jumlah"].quantile(0.90)
-    flags["Vendor sekali pakai bernilai besar"] = (freq == 1) & (df["Jumlah"] >= batas_besar)
-
-    # 11. NPWP kosong
-    if "NPWP Vendor" in df.columns:
-        flags["NPWP vendor kosong"] = df["NPWP Vendor"].isna() | (df["NPWP Vendor"].astype(str).str.strip() == "")
-
-    # Hitung skor (0-100) dan alasan
-    bobot = pd.Series({k: v[0] for k, v in RULES.items()})
-    skor = (flags.astype(int) * bobot).sum(axis=1).clip(upper=100)
-
-    hasil = df.copy()
-    hasil["Skor Risiko"] = skor
-    hasil["Level"] = pd.cut(skor, bins=[-1, 29, 59, 100], labels=["Rendah", "Sedang", "Tinggi"])
-    hasil["Alasan"] = flags.apply(lambda r: "; ".join(r.index[r.values]), axis=1)
-    return hasil
-
-
-def benford_analysis(amounts: pd.Series):
-    """Uji digit pertama (Benford's Law) + MAD menurut kriteria Nigrini."""
-    a = amounts[amounts > 0]
-    first = a.astype(str).str.replace(r"[^0-9]", "", regex=True).str.lstrip("0").str[0].astype(int)
-    observed = first.value_counts(normalize=True).reindex(range(1, 10), fill_value=0)
-    expected = pd.Series({d: np.log10(1 + 1 / d) for d in range(1, 10)})
-    mad = (observed - expected).abs().mean()
-    if mad < 0.006:
-        status = "Sangat sesuai Benford"
-    elif mad < 0.012:
-        status = "Cukup sesuai"
-    elif mad < 0.015:
-        status = "Batas (marginal)"
-    else:
-        status = "Tidak sesuai Benford (perlu ditelusuri)"
-    return observed, expected, mad, status, len(a)
-
-
-def rupiah(x: float) -> str:
-    return "Rp " + f"{x:,.0f}".replace(",", ".")
-
-
-def to_excel(df: pd.DataFrame) -> bytes:
-    out = BytesIO()
-    hasil = df.copy()
-    hasil["Tanggal"] = hasil["Tanggal"].dt.strftime("%Y-%m-%d")
-    hasil["Keputusan Auditor"] = ""  # diisi manual oleh auditor
-    hasil["Catatan Auditor"] = ""
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        hasil.sort_values("Skor Risiko", ascending=False).to_excel(writer, index=False, sheet_name="Hasil Skor")
-    return out.getvalue()
-
-
-# ------------------------------------------------------------------
-# UI
-# ------------------------------------------------------------------
-st.title("🔍 AuditLens – Skoring Risiko Transaksi & Red Flag")
-st.write(
-    "Unggah data transaksi (pembayaran/jurnal). Agen menghitung skor risiko dengan aturan & machine learning, "
-    "lalu AI menjelaskan temuan. **Hasil adalah indikasi, bukan kesimpulan kecurangan. Keputusan ada di auditor.**"
+# ==========================================
+# 1. KONFIGURASI HALAMAN & CSS
+# ==========================================
+st.set_page_config(
+    page_title="AuditInsight - AI Audit Assistant",
+    page_icon="🔍",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
+st.markdown("""
+    <style>
+    .main-header {font-size: 2.2rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0;}
+    .sub-header {font-size: 1rem; color: #64748B; margin-bottom: 1.5rem;}
+    .metric-card {background-color: #F8FAFC; padding: 15px; border-radius: 10px; border-left: 5px solid #1E3A8A;}
+    </style>
+""", unsafe_allow_html=True)
+
+# ==========================================
+# 2. FUNGSI PEMROSESAN & DETEKSI RED FLAG
+# ==========================================
+def clean_currency(val):
+    if pd.isna(val):
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    val_str = str(val).replace('Rp', '').replace(' ', '').strip()
+    if ',' in val_str and '.' in val_str:
+        if val_str.rfind(',') > val_str.rfind('.'):
+            val_str = val_str.replace('.', '').replace(',', '.')
+        else:
+            val_str = val_str.replace(',', '')
+    elif '.' in val_str:
+        parts = val_str.split('.')
+        if len(parts[-1]) == 3:
+            val_str = val_str.replace('.', '')
+    elif ',' in val_str:
+        parts = val_str.split(',')
+        if len(parts[-1]) == 3:
+            val_str = val_str.replace(',', '')
+        else:
+            val_str = val_str.replace(',', '.')
+    try:
+        return float(val_str)
+    except ValueError:
+        return 0.0
+
+def find_similar_vendors(vendors):
+    unique_vendors = list(set([str(v).strip() for v in vendors if pd.notna(v)]))
+    similar_map = {}
+    for i in range(len(unique_vendors)):
+        for j in range(i + 1, len(unique_vendors)):
+            v1, v2 = unique_vendors[i], unique_vendors[j]
+            if v1.lower() != v2.lower():
+                ratio = SequenceMatcher(None, v1.lower(), v2.lower()).ratio()
+                if ratio >= 0.85:
+                    similar_map[v1] = v2
+                    similar_map[v2] = v1
+    return similar_map
+
+def benford_analysis(amounts):
+    valid_amounts = [a for a in amounts if a >= 10]
+    if len(valid_amounts) < 10:
+        return None, set()
+    
+    first_digits = [int(str(int(a))[0]) for a in valid_amounts]
+    total = len(first_digits)
+    
+    benford_expected = {d: np.log10(1 + 1/d) * 100 for d in range(1, 10)}
+    actual_counts = {d: first_digits.count(d) for d in range(1, 10)}
+    actual_pct = {d: (actual_counts[d] / total) * 100 for d in range(1, 10)}
+    
+    # Tandai digit yang menyimpang > 5% di atas ekspektasi Benford
+    anomalous_digits = {d for d in range(1, 10) if (actual_pct[d] - benford_expected[d]) > 5.0}
+    
+    df_benford = pd.DataFrame({
+        'Digit': list(range(1, 10)),
+        'Aktual (%)': [round(actual_pct[d], 2) for d in range(1, 10)],
+        'Benford (%)': [round(benford_expected[d], 2) for d in range(1, 10)]
+    })
+    return df_benford, anomalous_digits
+
+def run_audit_engine(df_raw, auth_limit, round_mult, contamination):
+    df = df_raw.copy()
+    # Simpan nomor baris Excel asli (header baris 1, data mulai baris 2)
+    df['Baris Excel'] = df.index + 2
+    
+    # Normalisasi Kolom Wajib
+    df['Tanggal_Parsed'] = pd.to_datetime(df['Tanggal'], errors='coerce')
+    df['Vendor_Clean'] = df['Vendor'].astype(str).str.strip()
+    df['Faktur_Clean'] = df['No Faktur'].astype(str).str.strip()
+    df['Jumlah_Clean'] = df['Jumlah'].apply(clean_currency)
+    
+    has_creator = 'Dibuat Oleh' in df.columns
+    has_approver = 'Disetujui Oleh' in df.columns
+    has_npwp = 'NPWP Vendor' in df.columns
+
+    # Pre-kalkulasi agregat untuk aturan red flag
+    dup_faktur = df[df.duplicated(subset=['Faktur_Clean'], keep=False)]['Faktur_Clean'].unique()
+    dup_exact = df[df.duplicated(subset=['Vendor_Clean', 'Jumlah_Clean', 'Tanggal_Parsed'], keep=False)].index
+    
+    # Duplikat vendor & jumlah dalam 7 hari
+    df_sorted = df.sort_values('Tanggal_Parsed')
+    dup_7days_idx = set()
+    for vendor, group in df_sorted.groupby('Vendor_Clean'):
+        records = group[['Tanggal_Parsed', 'Jumlah_Clean']].to_dict('records')
+        indices = group.index.tolist()
+        for i in range(len(records)):
+            for j in range(i + 1, len(records)):
+                if pd.notna(records[i]['Tanggal_Parsed']) and pd.notna(records[j]['Tanggal_Parsed']):
+                    diff_days = abs((records[j]['Tanggal_Parsed'] - records[i]['Tanggal_Parsed']).days)
+                    if diff_days <= 7 and records[i]['Jumlah_Clean'] == records[j]['Jumlah_Clean'] and records[i]['Jumlah_Clean'] > 0:
+                        dup_7days_idx.add(indices[i])
+                        dup_7days_idx.add(indices[j])
+
+    # Split transaction: Beberapa transaksi ke vendor yang sama di hari yang sama melampaui batas otorisasi
+    daily_vendor_sum = df.groupby(['Vendor_Clean', 'Tanggal_Parsed'])['Jumlah_Clean'].transform('sum')
+    daily_vendor_cnt = df.groupby(['Vendor_Clean', 'Tanggal_Parsed'])['Jumlah_Clean'].transform('count')
+    split_tx_idx = set(df[(daily_vendor_cnt > 1) & (daily_vendor_sum > auth_limit) & (df['Jumlah_Clean'] <= auth_limit)].index)
+
+    # Vendor sekali pakai & nama mirip
+    vendor_counts = df['Vendor_Clean'].value_counts()
+    one_time_vendors = set(vendor_counts[vendor_counts == 1].index)
+    similar_vendor_map = find_similar_vendors(df['Vendor_Clean'].tolist())
+
+    # Uji Benford
+    df_benford, anomalous_digits = benford_analysis(df['Jumlah_Clean'].tolist())
+
+    # Machine Learning: Isolation Forest untuk Outlier
+    if len(df) >= 10:
+        iso = IsolationForest(contamination=contamination, random_state=42)
+        features = df[['Jumlah_Clean']].fillna(0)
+        df['Outlier_Pred'] = iso.fit_predict(features)
+    else:
+        df['Outlier_Pred'] = 1
+
+    # Evaluasi 11 Aturan Red Flag + ML + Benford
+    scores = []
+    reasons_list = []
+    all_flags = []
+
+    for idx, row in df.iterrows():
+        score = 0
+        reasons = []
+        amt = row['Jumlah_Clean']
+        tgl = row['Tanggal_Parsed']
+        vnd = row['Vendor_Clean']
+        fak = row['Faktur_Clean']
+
+        # Rule 1: Pembayaran ganda (No Faktur duplikat)
+        if fak in dup_faktur and fak.lower() not in ['nan', '', 'none', '-']:
+            score += 35
+            reasons.append("Duplikat No Faktur")
+            all_flags.append("Duplikat No Faktur")
+
+        # Rule 2: Duplikat identik (Vendor, Jumlah, Tanggal sama)
+        if idx in dup_exact:
+            score += 30
+            reasons.append("Transaksi Identik (Vendor, Jumlah, Tanggal)")
+            all_flags.append("Transaksi Identik")
+
+        # Rule 3: Duplikat nominal & vendor dalam 7 hari
+        if idx in dup_7days_idx and idx not in dup_exact:
+            score += 20
+            reasons.append("Nominal & Vendor Sama dalam <=7 Hari")
+            all_flags.append("Duplikat <=7 Hari")
+
+        # Rule 4: Pemecahan transaksi (Split Transaction)
+        if idx in split_tx_idx:
+            score += 25
+            reasons.append("Indikasi Split Transaction (Hindari Batas Otorisasi)")
+            all_flags.append("Split Transaction")
+
+        # Rule 5: Melebihi batas otorisasi tunggal
+        if amt > auth_limit:
+            score += 20
+            reasons.append(f"Melebihi Batas Otorisasi (> Rp {auth_limit:,.0f})")
+            all_flags.append("Melebihi Batas Otorisasi")
+
+        # Rule 6: Mendekati batas otorisasi (90% - 100% dari batas)
+        elif 0.90 * auth_limit <= amt <= auth_limit:
+            score += 15
+            reasons.append("Nominal Tepat di Bawah Batas Otorisasi (90-100%)")
+            all_flags.append("Mendekati Batas Otorisasi")
+
+        # Rule 7: Nominal angka bulat (Round Amount)
+        if amt > 0 and round_mult > 0 and (amt % round_mult == 0):
+            score += 10
+            reasons.append(f"Nominal Bulat Kelipatan Rp {round_mult:,.0f}")
+            all_flags.append("Nominal Bulat")
+
+        # Rule 8: Transaksi akhir pekan (Sabtu / Minggu)
+        if pd.notna(tgl) and tgl.weekday() >= 5:
+            score += 15
+            reasons.append("Transaksi Akhir Pekan (Sabtu/Minggu)")
+            all_flags.append("Transaksi Akhir Pekan")
+
+        # Rule 9: Vendor sekali pakai (One-time vendor) dengan nilai signifikan
+        if vnd in one_time_vendors and amt >= (0.5 * auth_limit):
+            score += 10
+            reasons.append("Vendor Sekali Pakai Bernilai Besar")
+            all_flags.append("Vendor Sekali Pakai")
+
+        # Rule 10: Nama vendor sangat mirip (Potensi vendor fiktif / duplikat)
+        if vnd in similar_vendor_map:
+            score += 15
+            reasons.append(f"Nama Vendor Mirip dengan '{similar_vendor_map[vnd]}'")
+            all_flags.append("Nama Vendor Mirip")
+
+        # Rule 11: Self-approval (Opsional)
+        if has_creator and has_approver:
+            c = str(row['Dibuat Oleh']).strip().lower()
+            a = str(row['Disetujui Oleh']).strip().lower()
+            if c == a and c not in ['nan', '', 'none', '-']:
+                score += 30
+                reasons.append("Self-Approval (Pembuat & Penyetuju Sama)")
+                all_flags.append("Self-Approval")
+
+        # Rule 12: Vendor tanpa identitas pajak / NPWP (Opsional)
+        if has_npwp:
+            npwp_val = str(row['NPWP Vendor']).strip().lower()
+            if npwp_val in ['nan', '', 'none', '-', '0']:
+                score += 10
+                reasons.append("Vendor Tanpa NPWP")
+                all_flags.append("Tanpa NPWP")
+
+        # Machine Learning: Isolation Forest Outlier
+        if row['Outlier_Pred'] == -1:
+            score += 15
+            reasons.append("Anomali Statistik (Isolation Forest Outlier)")
+            all_flags.append("ML Outlier")
+
+        # Benford's Law Anomaly
+        if amt >= 10:
+            first_digit = int(str(int(amt))[0])
+            if first_digit in anomalous_digits:
+                score += 5
+                reasons.append(f"Digit Awal ({first_digit}) Menyimpang dari Benford's Law")
+                all_flags.append("Penyimpangan Benford")
+
+        final_score = min(score, 100)
+        scores.append(final_score)
+        reasons_list.append("; ".join(reasons) if reasons else "Normal (Tidak ada red flag)")
+
+    df['Skor Risiko'] = scores
+    df['Level Risiko'] = df['Skor Risiko'].apply(
+        lambda s: 'Tinggi' if s >= 60 else ('Sedang' if s >= 30 else 'Rendah')
+    )
+    df['Alasan Red Flag'] = reasons_list
+
+    # Urutkan dari skor tertinggi
+    df_result = df.sort_values(by=['Skor Risiko', 'Jumlah_Clean'], ascending=[False, False]).reset_index(drop=True)
+    return df_result, df_benford, all_flags
+
+def generate_excel_export(df_result):
+    output = BytesIO()
+    cols_to_drop = ['Tanggal_Parsed', 'Vendor_Clean', 'Faktur_Clean', 'Jumlah_Clean', 'Outlier_Pred']
+    export_df = df_result.drop(columns=[c for c in cols_to_drop if c in df_result.columns]).copy()
+    
+    # Pindahkan Baris Excel, Skor Risiko, Level Risiko, Alasan Red Flag ke depan
+    priority_cols = ['Baris Excel', 'Skor Risiko', 'Level Risiko', 'Alasan Red Flag']
+    other_cols = [c for c in export_df.columns if c not in priority_cols]
+    export_df = export_df[priority_cols + other_cols]
+    
+    # Tambahkan kolom kosong untuk review auditor
+    export_df['Keputusan Auditor'] = ""
+    export_df['Catatan Auditor'] = ""
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        export_df.to_excel(writer, index=False, sheet_name='Hasil_Audit_Insight')
+    return output.getvalue()
+
+def get_groq_response(api_key, model_name, messages):
+    client = Groq(api_key=api_key)
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=messages,
+        temperature=0.3,
+        max_tokens=1500
+    )
+    return completion.choices[0].message.content
+
+# ==========================================
+# 3. SIDEBAR: PENGATURAN & KONFIGURASI AI
+# ==========================================
 with st.sidebar:
-    st.header("⚙️ Parameter Agen")
-    selected_model = st.selectbox(
-        "🤖 Pilih Model AI",
-        ["openai/gpt-oss-20b", "llama-3.3-70b-versatile", "openai/gpt-oss-120b"],
-        index=0,
+    st.image("https://img.icons8.com/fluency/96/financial-analytics.png", width=60)
+    st.title("Pengaturan Audit")
+    
+    st.subheader("1. Parameter Aturan")
+    auth_limit = st.number_input(
+        "Batas Otorisasi (Rp)", 
+        min_value=100000, 
+        value=50000000, 
+        step=5000000,
+        format="%d"
     )
-    approval_limit = st.number_input("Batas otorisasi (Rp)", min_value=0.0, value=50_000_000.0, step=1_000_000.0)
-    round_unit = st.number_input("Kelipatan nominal bulat (Rp)", min_value=1.0, value=1_000_000.0, step=100_000.0)
-    contamination = st.slider("Sensitivitas outlier (Isolation Forest)", 0.01, 0.10, 0.03, 0.01)
-    st.caption(
-        "Kolom wajib: Tanggal, Vendor, No Faktur, Jumlah.\n\n"
-        "Kolom opsional: Dibuat Oleh, Disetujui Oleh, NPWP Vendor."
+    round_mult = st.number_input(
+        "Kelipatan Nominal Bulat (Rp)", 
+        min_value=10000, 
+        value=1000000, 
+        step=100000,
+        format="%d"
     )
-
-uploaded_file = st.file_uploader("📂 Upload data transaksi (Excel)", type=["xlsx"])
-
-if uploaded_file:
-    raw = pd.read_excel(uploaded_file, nrows=0)
-    uploaded_file.seek(0)
-    missing = [c for c in REQUIRED_COLUMNS if c not in raw.columns]
-    if missing:
-        st.error(f"⚠️ Kolom wajib belum ada: {', '.join(missing)}")
-        st.stop()
-
-    df = load_data(uploaded_file)
-    scored = run_rules(df, approval_limit, round_unit, contamination)
-
-    n_total = len(scored)
-    n_tinggi = int((scored["Level"] == "Tinggi").sum())
-    n_sedang = int((scored["Level"] == "Sedang").sum())
-    nilai_tinggi = scored.loc[scored["Level"] == "Tinggi", "Jumlah"].sum()
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total transaksi", f"{n_total:,}")
-    c2.metric("Risiko Tinggi", n_tinggi)
-    c3.metric("Risiko Sedang", n_sedang)
-    c4.metric("Nilai risiko tinggi", rupiah(nilai_tinggi))
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📊 Ringkasan", "🚩 Transaksi Berisiko", "🏢 Vendor", "🔢 Benford", "🤖 AI Agent"]
+    contamination = st.slider(
+        "Sensitivitas Outlier (ML)", 
+        min_value=0.01, 
+        max_value=0.20, 
+        value=0.05, 
+        step=0.01,
+        help="Proporsi transaksi yang dianggap anomali ekstrem oleh Isolation Forest."
     )
 
-    # --- Tab 1: ringkasan ---
-    with tab1:
-        colA, colB = st.columns(2)
-        with colA:
-            fig_lvl = px.histogram(
-                scored, x="Skor Risiko", nbins=20, color="Level",
-                color_discrete_map={"Rendah": "#2ca02c", "Sedang": "#ff7f0e", "Tinggi": "#d62728"},
-                title="Distribusi skor risiko",
-            )
-            st.plotly_chart(fig_lvl, use_container_width=True)
-        with colB:
-            hitung = {}
-            for _, row in scored["Alasan"].items():
-                for r in filter(None, row.split("; ")):
-                    hitung[r] = hitung.get(r, 0) + 1
-            if hitung:
-                df_rule = pd.DataFrame({"Red flag": hitung.keys(), "Jumlah": hitung.values()}).sort_values("Jumlah")
-                fig_rule = px.bar(df_rule, x="Jumlah", y="Red flag", orientation="h", title="Frekuensi red flag")
-                st.plotly_chart(fig_rule, use_container_width=True)
-            else:
-                st.info("Tidak ada red flag terdeteksi.")
+    st.divider()
+    st.subheader("2. Konfigurasi AI (Groq)")
+    default_api_key = st.secrets.get("GROQ_API_KEY", os.environ.get("GROQ_API_KEY", ""))
+    groq_api_key = st.text_input("Groq API Key", value=default_api_key, type="password")
+    
+    model_choice = st.selectbox(
+        "Pilih Model LLM",
+        options=[
+            "openai/gpt-oss-20b",
+            "llama-3.3-70b-versatile",
+            "llama3-8b-8192",
+            "mixtral-8x7b-32768"
+        ],
+        index=0
+    )
 
-        with st.expander("📖 Daftar aturan dan bobot skor"):
-            st.dataframe(
-                pd.DataFrame([{"Aturan": k, "Bobot": v[0], "Penjelasan": v[1]} for k, v in RULES.items()]),
-                use_container_width=True, hide_index=True,
-            )
+    st.divider()
+    st.caption("**Prinsip AuditInsight:**\nKode yang menghitung, AI yang menjelaskan, auditor yang memutuskan. Skor merupakan indikasi red flag, bukan bukti fraud.")
 
-    # --- Tab 2: transaksi berisiko ---
-    with tab2:
-        level_filter = st.multiselect("Filter level", ["Tinggi", "Sedang", "Rendah"], default=["Tinggi", "Sedang"])
-        tampil = scored[scored["Level"].isin(level_filter)].sort_values("Skor Risiko", ascending=False)
-        kolom = ["Baris Excel", "Tanggal", "Vendor", "No Faktur", "Jumlah", "Skor Risiko", "Level", "Alasan"]
-        st.dataframe(tampil[kolom], use_container_width=True, hide_index=True)
-        st.download_button(
-            "⬇️ Unduh hasil (Excel, dengan kolom review auditor)",
-            data=to_excel(scored),
-            file_name="hasil_auditlens.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+# ==========================================
+# 4. HALAMAN UTAMA & UNGGAH DATA
+# ==========================================
+st.markdown('<p class="main-header">🔍 AuditInsight</p>', unsafe_allow_html=True)
+st.markdown('<p class="sub-header">Asisten Audit Berbasis AI untuk Pemeriksaan Populasi Transaksi Secara Menyeluruh</p>', unsafe_allow_html=True)
 
-    # --- Tab 3: vendor ---
-    with tab3:
-        vendor_df = (
-            scored.groupby("Vendor")
-            .agg(Transaksi=("Jumlah", "count"), Total=("Jumlah", "sum"),
-                 Skor_Rata2=("Skor Risiko", "mean"), Skor_Maks=("Skor Risiko", "max"))
-            .sort_values("Skor_Maks", ascending=False)
-            .reset_index()
-        )
-        vendor_df["Skor_Rata2"] = vendor_df["Skor_Rata2"].round(1)
-        st.dataframe(vendor_df, use_container_width=True, hide_index=True)
-        fig_v = px.scatter(
-            vendor_df, x="Transaksi", y="Skor_Maks", size="Total", hover_name="Vendor",
-            title="Peta risiko vendor (ukuran gelembung = total nilai)",
-        )
-        st.plotly_chart(fig_v, use_container_width=True)
+# Template Excel contoh untuk memudahkan pengguna
+with st.expander("ℹ️ Format File Excel & Unduh Template Contoh"):
+    st.write("Pastikan baris pertama file Excel Anda memiliki kolom wajib: **Tanggal, Vendor, No Faktur, Jumlah**. Kolom opsional: **Dibuat Oleh, Disetujui Oleh, NPWP Vendor**.")
+    sample_data = pd.DataFrame({
+        'Tanggal': ['2026-03-12', '2026-03-14', '2026-03-15', '2026-03-16', '2026-03-16', '2026-03-18'],
+        'Vendor': ['PT Sinar Abadi', 'CV Maju Jaya', 'PT Sinar Abadi', 'PT Mega Karya', 'PT Mega Karya', 'PT Sinar Abadii'],
+        'No Faktur': ['INV-1001', 'INV-2001', 'INV-1001', 'INV-301', 'INV-302', 'INV-1009'],
+        'Jumlah': [15250000, 65000000, 15250000, 30000000, 30000000, 10000000],
+        'Dibuat Oleh': ['Andi', 'Budi', 'Andi', 'Citra', 'Citra', 'Deni'],
+        'Disetujui Oleh': ['Eko', 'Budi', 'Eko', 'Eko', 'Eko', 'Eko'],
+        'NPWP Vendor': ['01.234.567.8-901.000', '', '01.234.567.8-901.000', '02.345.678.9-012.000', '02.345.678.9-012.000', '']
+    })
+    buf_sample = BytesIO()
+    with pd.ExcelWriter(buf_sample, engine='openpyxl') as writer:
+        sample_data.to_excel(writer, index=False)
+    st.download_button(
+        label="📥 Unduh Template Excel Contoh",
+        data=buf_sample.getvalue(),
+        file_name="template_transaksi_auditinsight.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
-    # --- Tab 4: Benford ---
-    with tab4:
-        observed, expected, mad, status, n_benford = benford_analysis(scored["Jumlah"])
-        fig_b = go.Figure()
-        fig_b.add_bar(x=list(range(1, 10)), y=observed.values, name="Aktual")
-        fig_b.add_scatter(x=list(range(1, 10)), y=expected.values, name="Benford", mode="lines+markers")
-        fig_b.update_layout(title="Distribusi digit pertama vs Benford's Law", xaxis_title="Digit pertama", yaxis_title="Proporsi")
-        st.plotly_chart(fig_b, use_container_width=True)
-        st.write(f"**MAD:** {mad:.4f} → **{status}** (n = {n_benford})")
-        if n_benford < 100:
-            st.warning("Data kurang dari 100 transaksi, uji Benford kurang andal.")
-        st.caption("Penyimpangan Benford hanya sinyal awal, bukan bukti kecurangan.")
+uploaded_file = st.file_uploader("Unggah File Transaksi Excel (.xlsx)", type=["xlsx"])
 
-    # --- Tab 5: AI Agent ---
-    with tab5:
-        top = scored[scored["Skor Risiko"] > 0].sort_values("Skor Risiko", ascending=False).head(15).copy()
-        top["Tanggal"] = top["Tanggal"].dt.strftime("%Y-%m-%d")
-        top_text = top[["Baris Excel", "Tanggal", "Vendor", "No Faktur", "Jumlah", "Skor Risiko", "Alasan"]].to_string(index=False)
+if uploaded_file is not None:
+    try:
+        df_raw = pd.read_excel(uploaded_file)
+        df_raw.columns = [str(c).strip() for c in df_raw.columns]
+        
+        required_cols = ['Tanggal', 'Vendor', 'No Faktur', 'Jumlah']
+        missing_cols = [c for c in required_cols if c not in df_raw.columns]
+        
+        if missing_cols:
+            st.error(f"❌ Kolom wajib berikut tidak ditemukan di file Excel Anda: **{', '.join(missing_cols)}**")
+            st.stop()
+            
+        # Jalankan Mesin Audit
+        df_res, df_benford, all_flags = run_audit_engine(df_raw, auth_limit, round_mult, contamination)
+        
+        # ==========================================
+        # 5. KARTU RINGKASAN (KPI)
+        # ==========================================
+        total_tx = len(df_res)
+        high_risk_df = df_res[df_res['Level Risiko'] == 'Tinggi']
+        med_risk_df = df_res[df_res['Level Risiko'] == 'Sedang']
+        high_risk_val = high_risk_df['Jumlah_Clean'].sum()
 
-        # Hanya RINGKASAN & 15 transaksi teratas yang dikirim ke LLM (bukan seluruh data)
-        context = (
-            f"Total transaksi: {n_total}\n"
-            f"Risiko Tinggi: {n_tinggi}, Sedang: {n_sedang}\n"
-            f"Nilai transaksi risiko tinggi: {rupiah(nilai_tinggi)}\n"
-            f"Benford MAD: {mad:.4f} ({status})\n\n"
-            f"15 transaksi skor tertinggi:\n{top_text}"
-        )
-
-        SYSTEM_PROMPT = """Anda adalah AI Risk & Fraud Analyst pendukung auditor.
-Aturan wajib:
-1. Gunakan HANYA angka dan data pada konteks yang diberikan. Jangan mengarang angka atau transaksi.
-2. Jangan menyimpulkan bahwa kecurangan telah terjadi. Gunakan istilah 'indikasi' atau 'red flag'.
-3. Untuk setiap temuan utama, berikan: penjelasan risiko, kemungkinan penyebab non-fraud (false positive),
-   dan prosedur audit lanjutan yang disarankan.
-4. Rujuk transaksi dengan 'Baris Excel' agar bisa ditelusuri.
-5. Jawab dalam Bahasa Indonesia, terstruktur, ringkas."""
-
-        if st.button("🚀 Buat Analisis AI"):
-            try:
-                resp = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Hasil skoring agen:\n{context}\n\nRingkas temuan utama dan prioritas investigasi."},
-                    ],
-                    model=selected_model,
-                    temperature=0.2,
-                )
-                st.session_state["ai_summary"] = resp.choices[0].message.content
-            except Exception as e:
-                st.error(f"⚠️ Permintaan AI gagal: {e}")
-
-        if "ai_summary" in st.session_state:
-            st.markdown("**AI Initial Analysis:**")
-            st.write(st.session_state["ai_summary"])
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Transaksi Diperiksa", f"{total_tx:,}")
+        col2.metric("Risiko Tinggi (Skor ≥ 60)", f"{len(high_risk_df):,}", delta="Perlu Prioritas", delta_color="inverse")
+        col3.metric("Risiko Sedang (Skor 30-59)", f"{len(med_risk_df):,}")
+        col4.metric("Nilai Risiko Tinggi", f"Rp {high_risk_val:,.0f}")
 
         st.divider()
 
-        # Chat berantai (persisten di session_state)
-        if "chat_history" not in st.session_state:
-            st.session_state.chat_history = []
+        # ==========================================
+        # 6. TABS DASHBOARD, TABEL, & AI ASSISTANT
+        # ==========================================
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "📊 Dashboard Visual", 
+            "🚨 Tabel Transaksi & Vendor", 
+            "🤖 Analisis & Chat AI", 
+            "📥 Unduh Kertas Kerja"
+        ])
 
-        user_query = st.text_input("💬 Tanya Fraud Agent (mis. 'Mengapa vendor X berisiko?', 'Prosedur audit apa selanjutnya?')")
-        col_chat1, col_chat2 = st.columns([4, 1])
-        with col_chat1:
-            send_btn = st.button("Send")
-        with col_chat2:
-            reset_btn = st.button("🔄 Reset Chat")
-
-        if reset_btn:
-            st.session_state.chat_history = []
-            st.success("Riwayat chat dihapus!")
-
-        if send_btn and user_query:
-            try:
-                chat_resp = client.chat.completions.create(
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        *st.session_state.chat_history,
-                        {"role": "user", "content": f"Konteks hasil skoring:\n{context}\n\nPertanyaan: {user_query}"},
-                    ],
-                    model=selected_model,
-                    temperature=0.2,
+        # --- TAB 1: DASHBOARD VISUAL ---
+        with tab1:
+            c1, c2 = st.columns(2)
+            with c1:
+                fig_hist = px.histogram(
+                    df_res, x="Skor Risiko", color="Level Risiko",
+                    color_discrete_map={'Tinggi': '#DC2626', 'Sedang': '#F59E0B', 'Rendah': '#10B981'},
+                    title="Sebaran Skor Risiko Transaksi",
+                    nbins=20
                 )
-                st.session_state.chat_history.append({"role": "user", "content": user_query})
-                st.session_state.chat_history.append({"role": "assistant", "content": chat_resp.choices[0].message.content})
-            except Exception as e:
-                st.error(f"⚠️ Chat AI gagal: {e}")
+                st.plotly_chart(fig_hist, use_container_width=True)
+                
+            with c2:
+                if all_flags:
+                    flag_counts = pd.Series(all_flags).value_counts().reset_index()
+                    flag_counts.columns = ['Jenis Red Flag', 'Jumlah']
+                    fig_flags = px.bar(
+                        flag_counts, x='Jumlah', y='Jenis Red Flag', orientation='h',
+                        title="Frekuensi Kemunculan Red Flag",
+                        color='Jumlah', color_continuous_scale='Reds'
+                    )
+                    fig_flags.update_layout(yaxis={'categoryorder': 'total ascending'})
+                    st.plotly_chart(fig_flags, use_container_width=True)
+                else:
+                    st.info("Tidak ditemukan red flag pada dataset ini.")
 
-        for msg in st.session_state.chat_history:
-            if msg["role"] == "user":
-                st.markdown(f"**👤 Anda:** {msg['content']}")
+            c3, c4 = st.columns(2)
+            with c3:
+                vendor_agg = df_res.groupby('Vendor_Clean').agg(
+                    Jumlah_Tx=('Jumlah_Clean', 'count'),
+                    Total_Nilai=('Jumlah_Clean', 'sum'),
+                    Skor_Rata2=('Skor Risiko', 'mean'),
+                    Skor_Maks=('Skor Risiko', 'max')
+                ).reset_index()
+                fig_vendor = px.scatter(
+                    vendor_agg, x='Jumlah_Tx', y='Total_Nilai',
+                    size='Skor_Maks', color='Skor_Rata2',
+                    hover_name='Vendor_Clean',
+                    color_continuous_scale='YlOrRd',
+                    title="Peta Risiko Vendor (Frekuensi vs Nilai vs Skor)"
+                )
+                st.plotly_chart(fig_vendor, use_container_width=True)
+
+            with c4:
+                if df_benford is not None:
+                    fig_benford = go.Figure()
+                    fig_benford.add_trace(go.Bar(
+                        x=df_benford['Digit'], y=df_benford['Aktual (%)'],
+                        name='Aktual (%)', marker_color='#2563EB'
+                    ))
+                    fig_benford.add_trace(go.Scatter(
+                        x=df_benford['Digit'], y=df_benford['Benford (%)'],
+                        name='Ekspektasi Benford (%)', mode='lines+markers',
+                        line=dict(color='#DC2626', width=3)
+                    ))
+                    fig_benford.update_layout(
+                        title="Uji Benford's Law (Distribusi Digit Pertama)",
+                        xaxis_title="Digit Pertama (1-9)",
+                        yaxis_title="Persentase (%)"
+                    )
+                    st.plotly_chart(fig_benford, use_container_width=True)
+                else:
+                    st.info("Data tidak cukup (minimal 10 transaksi bernilai ≥ 10) untuk menampilkan grafik Benford's Law.")
+
+        # --- TAB 2: TABEL TRANSAKSI & VENDOR ---
+        with tab2:
+            st.subheader("Daftar Transaksi Berdasarkan Tingkat Risiko")
+            filter_level = st.multiselect(
+                "Filter Level Risiko:",
+                options=['Tinggi', 'Sedang', 'Rendah'],
+                default=['Tinggi', 'Sedang']
+            )
+            
+            display_cols = ['Baris Excel', 'Tanggal', 'Vendor', 'No Faktur', 'Jumlah', 'Skor Risiko', 'Level Risiko', 'Alasan Red Flag']
+            filtered_df = df_res[df_res['Level Risiko'].isin(filter_level)][display_cols]
+            st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+
+            st.divider()
+            st.subheader("Ringkasan Risiko per Vendor")
+            vendor_table = df_res.groupby('Vendor_Clean').agg(
+                Jumlah_Transaksi=('Jumlah_Clean', 'count'),
+                Total_Nilai=('Jumlah_Clean', 'sum'),
+                Skor_Rata_Rata=('Skor Risiko', lambda x: round(x.mean(), 1)),
+                Skor_Tertinggi=('Skor Risiko', 'max')
+            ).sort_values(by=['Skor_Tertinggi', 'Total_Nilai'], ascending=False).reset_index()
+            vendor_table.rename(columns={'Vendor_Clean': 'Vendor'}, inplace=True)
+            st.dataframe(vendor_table, use_container_width=True, hide_index=True)
+
+        # --- TAB 3: ANALISIS & CHAT AI ---
+        with tab3:
+            st.subheader("Asisten Penjelasan Temuan Audit (AI)")
+            if not groq_api_key:
+                st.warning("⚠️ Masukkan **Groq API Key** di sidebar sebelah kiri untuk mengaktifkan fitur analisis dan tanya-jawab AI.")
             else:
-                st.markdown(f"**🤖 Agent:** {msg['content']}")
+                # Siapkan konteks ringkas & 15 transaksi risiko tertinggi (menjaga privasi & efisiensi token)
+                top_15 = df_res[['Baris Excel', 'Tanggal', 'Vendor', 'No Faktur', 'Jumlah', 'Skor Risiko', 'Level Risiko', 'Alasan Red Flag']].head(15)
+                top_15_str = top_15.to_string(index=False)
+                
+                system_prompt = f"""Anda adalah asisten auditor profesional yang membantu menganalisis hasil deteksi anomali transaksi dari sistem AuditInsight.
+Prinsip wajib Anda:
+1. Gunakan istilah 'indikasi risiko', 'anomali', atau 'red flag'. JANGAN PERNAH menyimpulkan bahwa 'fraud' atau kecurangan pasti telah terjadi.
+2. Jelaskan secara objektif mengapa transaksi tertentu mendapat skor tinggi berdasarkan aturan yang terpicu.
+3. Selalu sertakan kemungkinan penyebab non-fraud (misalnya kesalahan input administrasi, urgensi operasional, atau kebijakan khusus).
+4. Berikan rekomendasi prosedur audit substantif/lanjutan yang konkret bagi auditor (misalnya vouching dokumen fisik, konfirmasi pihak ketiga, pemeriksaan PO/GRN).
+5. Gunakan Bahasa Indonesia yang formal, jelas, dan terstruktur.
+
+Ringkasan Data Audit Saat Ini:
+- Total Transaksi: {total_tx}
+- Risiko Tinggi: {len(high_risk_df)} transaksi (Total nilai: Rp {high_risk_val:,.0f})
+- Risiko Sedang: {len(med_risk_df)} transaksi
+- Batas Otorisasi Ditetapkan: Rp {auth_limit:,.0f}
+
+15 Transaksi dengan Skor Risiko Tertinggi:
+{top_15_str}
+"""
+                if st.button("✨ Buat Ringkasan Temuan Otomatis", type="primary"):
+                    with st.spinner("AI sedang menganalisis pola temuan..."):
+                        try:
+                            summary_prompt = "Buatkan ringkasan eksekutif dari temuan utama di atas, jelaskan pola red flag yang paling menonjol, sebutkan kemungkinan penyebab non-fraud, dan susun langkah prosedur audit lanjutan yang disarankan."
+                            ai_summary = get_groq_response(
+                                groq_api_key, 
+                                model_choice, 
+                                [{"role": "system", "content": system_prompt}, {"role": "user", "content": summary_prompt}]
+                            )
+                            st.session_state['ai_summary'] = ai_summary
+                        except Exception as e:
+                            st.error(f"Terjadi kesalahan koneksi ke Groq API: {e}")
+
+                if 'ai_summary' in st.session_state:
+                    st.markdown(st.session_state['ai_summary'])
+
+                st.divider()
+                st.subheader("💬 Chat Tanya-Jawab Lanjutan")
+                
+                if "chat_history" not in st.session_state:
+                    st.session_state.chat_history = []
+
+                for msg in st.session_state.chat_history:
+                    with st.chat_message(msg["role"]):
+                        st.markdown(msg["content"])
+
+                user_q = st.chat_input("Tanyakan sesuatu, misal: 'Mengapa transaksi di baris Excel 3 berisiko tinggi?'")
+                if user_q:
+                    st.session_state.chat_history.append({"role": "user", "content": user_q})
+                    with st.chat_message("user"):
+                        st.markdown(user_q)
+
+                    with st.chat_message("assistant"):
+                        with st.spinner("Menyusun jawaban..."):
+                            try:
+                                api_messages = [{"role": "system", "content": system_prompt}] + st.session_state.chat_history
+                                reply = get_groq_response(groq_api_key, model_choice, api_messages)
+                                st.markdown(reply)
+                                st.session_state.chat_history.append({"role": "assistant", "content": reply})
+                            except Exception as e:
+                                st.error(f"Gagal memproses pertanyaan: {e}")
+
+        # --- TAB 4: UNDUH KERTAS KERJA ---
+        with tab4:
+            st.subheader("Ekspor Kertas Kerja Audit (Excel)")
+            st.write("File Excel yang diunduh memuat seluruh transaksi yang diurutkan dari skor risiko tertinggi, lengkap dengan nomor baris Excel asli serta kolom kosong **Keputusan Auditor** dan **Catatan Auditor** untuk dokumentasi review Anda.")
+            
+            excel_bytes = generate_excel_export(df_res)
+            st.download_button(
+                label="📥 Unduh Hasil Audit (.xlsx)",
+                data=excel_bytes,
+                file_name=f"AuditInsight_Hasil_{uploaded_file.name}",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+
+    except Exception as e:
+        st.error(f"Terjadi kesalahan saat memproses file Excel: {e}")
+else:
+    st.info("Silakan unggah file Excel transaksi Anda di atas untuk memulai pemeriksaan otomatis.")
