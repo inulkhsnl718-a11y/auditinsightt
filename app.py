@@ -7,6 +7,7 @@ import plotly.graph_objects as go
 from difflib import SequenceMatcher
 from io import BytesIO
 import os
+import time
 from google import genai
 from google.genai import types
 
@@ -101,7 +102,7 @@ def to_excel_bytes(df_export, sheet_name="Hasil_Audit"):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-def get_gemini_response(api_key, model_name, system_instruction, messages):
+def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=3):
     client = genai.Client(api_key=api_key)
     contents = []
     for m in messages:
@@ -112,16 +113,28 @@ def get_gemini_response(api_key, model_name, system_instruction, messages):
                 parts=[types.Part.from_text(text=m["content"])]
             )
         )
-    response = client.models.generate_content(
-        model=model_name,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            temperature=0.3,
-            max_output_tokens=1600
-        )
-    )
-    return response.text or "Tidak ada respons teks yang dihasilkan oleh Gemini."
+
+    last_error = None
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    temperature=0.3,
+                    max_output_tokens=1600
+                )
+            )
+            return response.text or "Tidak ada respons teks yang dihasilkan oleh Gemini."
+        except Exception as e:
+            last_error = e
+            err_str = str(e)
+            is_temporary = ("503" in err_str) or ("UNAVAILABLE" in err_str) or ("429" in err_str)
+            if is_temporary and attempt < max_retries - 1:
+                time.sleep(2 * (attempt + 1))
+                continue
+            raise last_error
 
 def auto_match_col(columns, keywords):
     for col in columns:
