@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import IsolationForest
@@ -8,11 +9,12 @@ from difflib import SequenceMatcher
 from io import BytesIO
 import os
 import time
+import html as html_lib
 from google import genai
 from google.genai import types
 
 # ==========================================
-# 1. KONFIGURASI HALAMAN & CSS
+# 1. KONFIGURASI HALAMAN & TEMA VISUAL
 # ==========================================
 st.set_page_config(
     page_title="AuditInsight - Multi-Module AI Audit",
@@ -21,12 +23,316 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.markdown("""
-    <style>
-    .main-header {font-size: 2.1rem; font-weight: 700; color: #1E3A8A; margin-bottom: 0;}
-    .sub-header {font-size: 1rem; color: #64748B; margin-bottom: 1.2rem;}
-    </style>
-""", unsafe_allow_html=True)
+RISK_COLORS = {"Tinggi": "#E5484D", "Sedang": "#F5A524", "Rendah": "#12A594"}
+
+CUSTOM_CSS = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+    --ink: #0B1B3A;
+    --ink-2: #12285A;
+    --blue: #1D4ED8;
+    --teal: #0D9488;
+    --cyan: #22D3EE;
+    --amber: #F5A524;
+    --muted: #5B6B86;
+    --line: rgba(29, 78, 216, .14);
+}
+
+/* ---------- Dasar ---------- */
+.stApp, .stMarkdown, label, p, h1, h2, h3, h4, button, input, textarea {
+    font-family: 'Inter', sans-serif;
+}
+h1, h2, h3 { font-family: 'Space Grotesk', 'Inter', sans-serif; letter-spacing: -.01em; }
+
+.stApp {
+    background:
+        radial-gradient(1100px 560px at 95% -8%, rgba(34, 211, 238, .16), transparent 60%),
+        radial-gradient(900px 520px at -8% 12%, rgba(29, 78, 216, .10), transparent 55%),
+        linear-gradient(180deg, #F5F8FD 0%, #EAF0F9 100%);
+}
+header[data-testid="stHeader"] { background: transparent; }
+.block-container { padding-top: 2.2rem; max-width: 1280px; }
+footer { visibility: hidden; }
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg, #1D4ED8, #0D9488); border-radius: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Sidebar ---------- */
+section[data-testid="stSidebar"] {
+    background: linear-gradient(185deg, #081530 0%, #0E2250 55%, #0A3A4A 100%);
+    border-right: 1px solid rgba(255, 255, 255, .07);
+}
+section[data-testid="stSidebar"] * { color: #DCE6F7; }
+section[data-testid="stSidebar"] h1,
+section[data-testid="stSidebar"] h2,
+section[data-testid="stSidebar"] h3 { color: #FFFFFF; }
+section[data-testid="stSidebar"] hr { border-color: rgba(255, 255, 255, .10); }
+
+.brand { display: flex; align-items: center; gap: .8rem; margin: .2rem 0 1.2rem; }
+.brand svg { filter: drop-shadow(0 6px 14px rgba(34, 211, 238, .45)); animation: floaty 5s ease-in-out infinite; }
+.brand b { display: block; font-family: 'Space Grotesk', sans-serif; font-size: 1.45rem; color: #fff; line-height: 1.1; }
+.brand span { font-size: .78rem; color: #8FB4E8; }
+
+section[data-testid="stSidebar"] div[role="radiogroup"] label {
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .09);
+    border-radius: 12px;
+    padding: .6rem .85rem;
+    margin-bottom: .45rem;
+    transition: transform .25s ease, background .25s ease, border-color .25s ease;
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+    transform: translateX(5px);
+    background: rgba(34, 211, 238, .10);
+    border-color: rgba(34, 211, 238, .4);
+}
+section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+    background: linear-gradient(135deg, rgba(29, 78, 216, .75), rgba(13, 148, 136, .75));
+    border-color: rgba(34, 211, 238, .65);
+    box-shadow: 0 10px 24px -10px rgba(34, 211, 238, .55);
+}
+section[data-testid="stSidebar"] div[data-baseweb="input"],
+section[data-testid="stSidebar"] div[data-baseweb="select"] > div {
+    background: rgba(255, 255, 255, .07) !important;
+    border: 1px solid rgba(255, 255, 255, .14) !important;
+    border-radius: 10px !important;
+}
+section[data-testid="stSidebar"] input { background: transparent !important; color: #fff !important; }
+section[data-testid="stSidebar"] div[data-baseweb="input"] button { background: rgba(255, 255, 255, .08) !important; }
+
+/* ---------- Kartu metrik ---------- */
+div[data-testid="stMetric"] {
+    position: relative;
+    overflow: hidden;
+    background: rgba(255, 255, 255, .88);
+    backdrop-filter: blur(8px);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 1.05rem 1.25rem 1.05rem 1.4rem;
+    box-shadow: 0 14px 32px -18px rgba(11, 27, 58, .45);
+    transition: transform .3s ease, box-shadow .3s ease;
+}
+div[data-testid="stMetric"]::before {
+    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 5px;
+    background: linear-gradient(180deg, var(--blue), var(--teal));
+}
+div[data-testid="stMetric"]:hover { transform: translateY(-5px); box-shadow: 0 22px 40px -18px rgba(29, 78, 216, .5); }
+div[data-testid="stMetricLabel"] p { color: var(--muted); font-weight: 600; font-size: .8rem; }
+div[data-testid="stMetricValue"] { color: var(--ink); font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
+
+/* ---------- Tab ---------- */
+.stTabs [data-baseweb="tab-list"] {
+    gap: 6px; background: rgba(255, 255, 255, .8); padding: 6px;
+    border-radius: 14px; border: 1px solid var(--line);
+}
+.stTabs [data-baseweb="tab"] { border-radius: 10px; height: auto; padding: .55rem 1.05rem; transition: background .25s ease; }
+.stTabs [data-baseweb="tab"] p { font-weight: 600; color: #3B4B69; }
+.stTabs [data-baseweb="tab"]:hover { background: rgba(29, 78, 216, .08); }
+.stTabs [aria-selected="true"] { background: linear-gradient(135deg, var(--blue), var(--teal)); box-shadow: 0 8px 18px -8px rgba(29, 78, 216, .7); }
+.stTabs [aria-selected="true"] p { color: #fff !important; }
+.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none; }
+
+/* ---------- Tombol ---------- */
+.stButton > button, .stDownloadButton > button {
+    border-radius: 12px; font-weight: 600; padding: .6rem 1.1rem;
+    border: 1px solid rgba(29, 78, 216, .28); background: #fff; color: var(--ink);
+    transition: transform .2s ease, box-shadow .2s ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover {
+    transform: translateY(-2px); box-shadow: 0 12px 22px -12px rgba(29, 78, 216, .65);
+    border-color: var(--blue); color: var(--blue);
+}
+.stButton > button[kind="primary"], .stButton > button[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(135deg, var(--blue), var(--teal)); color: #fff; border: none;
+    background-size: 200% 200%; animation: sheen 6s ease infinite;
+}
+.stButton > button[kind="primary"] p, .stButton > button[data-testid="stBaseButton-primary"] p { color: #fff; }
+.stDownloadButton > button { background: linear-gradient(135deg, #0B1B3A, #12285A); color: #fff; border: none; }
+.stDownloadButton > button p { color: #fff; }
+.stDownloadButton > button:hover { color: #fff; }
+
+/* ---------- Komponen lain ---------- */
+section[data-testid="stFileUploaderDropzone"] {
+    border: 2px dashed rgba(29, 78, 216, .4); border-radius: 18px;
+    background: linear-gradient(135deg, rgba(255, 255, 255, .95), rgba(230, 240, 252, .95));
+    transition: border-color .3s ease, box-shadow .3s ease;
+}
+section[data-testid="stFileUploaderDropzone"]:hover { border-color: var(--teal); box-shadow: 0 16px 32px -18px rgba(13, 148, 136, .6); }
+
+div[data-testid="stExpander"] {
+    border-radius: 16px; border: 1px solid var(--line);
+    background: rgba(255, 255, 255, .82); box-shadow: 0 12px 28px -20px rgba(11, 27, 58, .5);
+}
+div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"] {
+    background: #fff; border-radius: 16px; border: 1px solid var(--line);
+    box-shadow: 0 14px 30px -20px rgba(11, 27, 58, .5); padding: .35rem; overflow: hidden;
+}
+div[data-testid="stAlert"] { border-radius: 14px; border: 1px solid var(--line); }
+hr { border: none !important; height: 1px; background: linear-gradient(90deg, transparent, rgba(29, 78, 216, .35), transparent) !important; }
+
+/* ---------- Kartu fitur (halaman kosong) ---------- */
+.feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.1rem; margin-top: 1.4rem; perspective: 1100px; }
+.feature-card {
+    background: rgba(255, 255, 255, .9); border: 1px solid var(--line); border-radius: 18px;
+    padding: 1.4rem 1.4rem 1.5rem; box-shadow: 0 16px 34px -22px rgba(11, 27, 58, .55);
+    transition: transform .35s ease, box-shadow .35s ease; transform-style: preserve-3d;
+}
+.feature-card:hover { transform: rotateX(5deg) rotateY(-6deg) translateY(-8px); box-shadow: 0 30px 50px -24px rgba(29, 78, 216, .55); }
+.feature-card .ico {
+    width: 50px; height: 50px; border-radius: 14px; display: grid; place-items: center; font-size: 1.5rem; margin-bottom: .9rem;
+    background: linear-gradient(135deg, var(--blue), var(--teal)); box-shadow: 0 12px 22px -10px rgba(29, 78, 216, .7);
+    transform: translateZ(30px);
+}
+.feature-card h4 { margin: 0 0 .35rem; font-family: 'Space Grotesk', sans-serif; color: var(--ink); font-size: 1.1rem; }
+.feature-card p { margin: 0; color: var(--muted); font-size: .92rem; line-height: 1.55; }
+.app-footer { text-align: center; color: #7A8AA6; font-size: .8rem; margin: 2.5rem 0 .5rem; }
+
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+@keyframes sheen { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+@keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+div[data-testid="stMetric"], .feature-card { animation: rise .6s ease both; }
+
+@media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+HERO_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Space+Grotesk:wght@700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:transparent;font-family:'Inter',sans-serif;overflow:hidden}
+.hero{position:relative;height:310px;border-radius:24px;overflow:hidden;
+ background:radial-gradient(760px 380px at 82% 10%,rgba(34,211,238,.38),transparent 60%),
+ radial-gradient(620px 360px at 0% 100%,rgba(29,78,216,.55),transparent 60%),
+ linear-gradient(135deg,#071229,#0E2250 58%,#0A3A4A);
+ box-shadow:0 28px 60px -26px rgba(7,18,41,.8)}
+.grid{position:absolute;inset:0;opacity:.7;
+ background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
+ background-size:38px 38px;-webkit-mask-image:linear-gradient(100deg,transparent 10%,#000 60%);mask-image:linear-gradient(100deg,transparent 10%,#000 60%)}
+canvas{position:absolute;inset:0;width:100%;height:100%}
+.copy{position:relative;z-index:2;padding:40px 46px;max-width:60%;animation:in .9s ease both}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#9FE7F2;
+ background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.35);padding:6px 12px;border-radius:99px}
+.badge i{width:8px;height:8px;border-radius:50%;background:#22D3EE;box-shadow:0 0 0 0 rgba(34,211,238,.7);animation:pulse 2s infinite}
+h1{margin:16px 0 10px;font-family:'Space Grotesk',sans-serif;font-size:46px;line-height:1.05;color:#fff;letter-spacing:-.02em}
+h1 span{background:linear-gradient(90deg,#7DD3FC,#5EEAD4);-webkit-background-clip:text;background-clip:text;color:transparent}
+p{color:#B9C9E6;font-size:15px;line-height:1.6;max-width:560px}
+p b{color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.chips em{font-style:normal;font-size:12px;font-weight:500;color:#DCE6F7;padding:5px 11px;border-radius:8px;
+ background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)}
+#fb{display:none;position:absolute;right:14%;top:50%;margin-top:-70px;width:140px;height:140px;perspective:700px}
+.cube{width:100%;height:100%;position:relative;transform-style:preserve-3d;animation:spin 12s linear infinite}
+.cube div{position:absolute;width:140px;height:140px;border:1px solid rgba(125,211,252,.7);background:rgba(34,211,238,.14)}
+.cube div:nth-child(1){transform:translateZ(70px)}.cube div:nth-child(2){transform:rotateY(90deg) translateZ(70px)}
+.cube div:nth-child(3){transform:rotateY(180deg) translateZ(70px)}.cube div:nth-child(4){transform:rotateY(-90deg) translateZ(70px)}
+.cube div:nth-child(5){transform:rotateX(90deg) translateZ(70px)}.cube div:nth-child(6){transform:rotateX(-90deg) translateZ(70px)}
+@keyframes spin{to{transform:rotateX(360deg) rotateY(360deg)}}
+@keyframes pulse{70%{box-shadow:0 0 0 9px rgba(34,211,238,0)}100%{box-shadow:0 0 0 0 rgba(34,211,238,0)}}
+@keyframes in{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@media(max-width:760px){.copy{max-width:100%;padding:30px 24px}h1{font-size:34px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style></head><body>
+<div class="hero" id="hero">
+ <div class="grid"></div>
+ <canvas id="c"></canvas>
+ <div id="fb"><div class="cube"><div></div><div></div><div></div><div></div><div></div><div></div></div></div>
+ <div class="copy">
+  <span class="badge"><i></i>Audit berbasis AI</span>
+  <h1>AuditInsight <span>Multi-Modul</span></h1>
+  <p>Mode Aktif: <b>__MODE__</b> — Didukung Gemini AI. Unggah file Excel (.xlsx) Anda langsung tanpa perlu memakai template khusus.</p>
+  <div class="chips"><em>Isolation Forest</em><em>Hukum Benford</em><em>Analisis Rasio</em><em>Gemini AI</em></div>
+ </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function(){
+ var cv=document.getElementById('c'),fb=document.getElementById('fb'),hero=document.getElementById('hero');
+ if(typeof THREE==='undefined'){cv.style.display='none';fb.style.display='block';return;}
+ var W=hero.clientWidth,H=hero.clientHeight;
+ var renderer=new THREE.WebGLRenderer({canvas:cv,antialias:true,alpha:true});
+ renderer.setPixelRatio(Math.min(window.devicePixelRatio||1,2));renderer.setSize(W,H,false);
+ var scene=new THREE.Scene();
+ var cam=new THREE.PerspectiveCamera(40,W/H,0.1,100);cam.position.set(0,1,12);
+ scene.add(new THREE.AmbientLight(0xffffff,.6));
+ var l1=new THREE.PointLight(0x38bdf8,1.7,60);l1.position.set(6,6,9);scene.add(l1);
+ var l2=new THREE.PointLight(0x2dd4bf,1.3,60);l2.position.set(-7,2,7);scene.add(l2);
+ var group=new THREE.Group();scene.add(group);
+ var cols=[0x1d4ed8,0x2563eb,0x0d9488,0x22d3ee,0x38bdf8],hs=[1.6,2.5,2.0,3.3,2.7],bars=[];
+ for(var i=0;i<5;i++){
+  var m=new THREE.Mesh(new THREE.BoxGeometry(.72,1,.72),
+   new THREE.MeshStandardMaterial({color:cols[i],metalness:.55,roughness:.22,emissive:cols[i],emissiveIntensity:.18}));
+  m.position.x=(i-2)*1.05;group.add(m);bars.push({m:m,h:hs[i]});
+ }
+ var disc=new THREE.Mesh(new THREE.CylinderGeometry(3.5,3.5,.1,64),
+  new THREE.MeshStandardMaterial({color:0x0b1b3a,metalness:.8,roughness:.3,transparent:true,opacity:.85}));
+ disc.position.y=-1.6;group.add(disc);
+ var rim=new THREE.Mesh(new THREE.TorusGeometry(3.5,.03,8,96),new THREE.MeshBasicMaterial({color:0x22d3ee}));
+ rim.rotation.x=Math.PI/2;rim.position.y=-1.55;group.add(rim);
+ var mag=new THREE.Group();
+ var ring=new THREE.Mesh(new THREE.TorusGeometry(1.25,.13,24,96),
+  new THREE.MeshStandardMaterial({color:0xfbbf24,metalness:.9,roughness:.2,emissive:0xf59e0b,emissiveIntensity:.25}));
+ var glass=new THREE.Mesh(new THREE.CircleGeometry(1.2,48),
+  new THREE.MeshBasicMaterial({color:0x7dd3fc,transparent:true,opacity:.16,side:THREE.DoubleSide}));
+ var handle=new THREE.Mesh(new THREE.CylinderGeometry(.14,.18,1.5,20),
+  new THREE.MeshStandardMaterial({color:0xfbbf24,metalness:.9,roughness:.25}));
+ handle.position.set(1.15,-1.15,0);handle.rotation.z=Math.PI/4;
+ mag.add(ring,glass,handle);mag.position.set(.9,2.5,1.6);group.add(mag);
+ var orbs=[];
+ for(var k=0;k<3;k++){
+  var o=new THREE.Mesh(new THREE.SphereGeometry(.17,20,20),new THREE.MeshBasicMaterial({color:k==1?0xfbbf24:0x5eead4}));
+  group.add(o);orbs.push(o);
+ }
+ var N=240,pos=new Float32Array(N*3);
+ for(var p=0;p<N;p++){pos[p*3]=(Math.random()-.5)*30;pos[p*3+1]=(Math.random()-.5)*9;pos[p*3+2]=(Math.random()-.5)*10-2;}
+ var pg=new THREE.BufferGeometry();pg.setAttribute('position',new THREE.BufferAttribute(pos,3));
+ var pts=new THREE.Points(pg,new THREE.PointsMaterial({size:.05,color:0x93c5fd,transparent:true,opacity:.7}));
+ scene.add(pts);
+ function place(){
+  var aspect=W/H,vis=2*cam.position.z*Math.tan(THREE.Math.degToRad(cam.fov/2));
+  group.scale.setScalar(W<760?.55:.82);
+  group.position.set(W<760?vis*aspect*.30:vis*aspect*.27,-.4,0);
+ }
+ place();
+ var mx=0,my=0;
+ window.addEventListener('pointermove',function(e){mx=(e.clientX/W-.5);my=(e.clientY/H-.5);});
+ window.addEventListener('resize',function(){W=hero.clientWidth;H=hero.clientHeight;renderer.setSize(W,H,false);cam.aspect=W/H;cam.updateProjectionMatrix();place();});
+ var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches,t=0;
+ function loop(){
+  requestAnimationFrame(loop);if(!reduce)t+=.012;
+  group.rotation.y=-.5+Math.sin(t*.6)*.35+mx*.5;group.rotation.x=.12+my*.2;
+  bars.forEach(function(b,i){var s=b.h*(1+.1*Math.sin(t*1.6+i*.9));b.m.scale.y=s;b.m.position.y=s/2-1.55;});
+  mag.rotation.z=Math.sin(t)*.12;mag.position.y=2.6+Math.sin(t*1.3)*.18;
+  orbs.forEach(function(o,i){var a=t*1.1+i*2.09;o.position.set(Math.cos(a)*4.1,Math.sin(a*1.4)*1.2+.8,Math.sin(a)*4.1);});
+  pts.rotation.y=t*.05;
+  renderer.render(scene,cam);
+ }
+ loop();
+})();
+</script></body></html>"""
+
+def render_hero(mode_name):
+    components.html(HERO_HTML.replace("__MODE__", html_lib.escape(mode_name)), height=325)
+
+def style_fig(fig):
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="Inter, sans-serif", color="#334155"),
+        title=dict(font=dict(size=16, color="#0B1B3A")),
+        margin=dict(l=20, r=20, t=60, b=20),
+        legend=dict(bgcolor="rgba(255,255,255,0)"),
+        hoverlabel=dict(bgcolor="#0B1B3A", font_color="#FFFFFF"),
+    )
+    fig.update_xaxes(gridcolor="rgba(148,163,184,.25)", zeroline=False)
+    fig.update_yaxes(gridcolor="rgba(148,163,184,.25)", zeroline=False)
+    return fig
 
 # ==========================================
 # 2. FUNGSI BANTU & PEMBERSIHAN DATA
@@ -441,8 +747,22 @@ def run_budget_analysis(df_raw, col_pos, col_pagu, col_real, round_mult):
 # 6. SIDEBAR: KONFIGURASI & GEMINI AI
 # ==========================================
 with st.sidebar:
-    st.image("https://img.icons8.com/fluency/96/financial-analytics.png", width=56)
-    st.title("AuditInsight")
+    st.markdown("""
+    <div class="brand">
+      <svg width="52" height="52" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="g1" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#38BDF8"/><stop offset="1" stop-color="#14B8A6"/></linearGradient>
+          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="64"><stop stop-color="#1D4ED8"/><stop offset="1" stop-color="#0D9488"/></linearGradient>
+        </defs>
+        <rect x="6" y="34" width="9" height="20" rx="2.5" fill="url(#g2)"/>
+        <rect x="19" y="24" width="9" height="30" rx="2.5" fill="url(#g2)"/>
+        <rect x="32" y="29" width="9" height="25" rx="2.5" fill="url(#g2)"/>
+        <circle cx="42" cy="22" r="13" stroke="url(#g1)" stroke-width="5"/>
+        <path d="M51.5 31.5L59 39" stroke="#FBBF24" stroke-width="5.5" stroke-linecap="round"/>
+      </svg>
+      <div><b>AuditInsight</b><span>Platform audit multi-modul</span></div>
+    </div>
+    """, unsafe_allow_html=True)
     mode = st.radio(
         "Pilih Jenis Data / Modul:",
         options=[
@@ -478,8 +798,7 @@ with st.sidebar:
 # ==========================================
 # 7. HALAMAN UTAMA & UNGGAH FILE
 # ==========================================
-st.markdown('<p class="main-header">🔍 AuditInsight Multi-Modul</p>', unsafe_allow_html=True)
-st.markdown(f'<p class="sub-header">Mode Aktif: <b>{mode}</b> — Didukung Gemini AI. Unggah file Excel (.xlsx) Anda langsung tanpa perlu memakai template khusus.</p>', unsafe_allow_html=True)
+render_hero(mode)
 
 uploaded_file = st.file_uploader("Unggah File Excel (.xlsx)", type=["xlsx"])
 
@@ -533,18 +852,18 @@ if uploaded_file is not None:
             with t1:
                 g1, g2 = st.columns(2)
                 with g1:
-                    st.plotly_chart(px.histogram(df_res, x="Skor Risiko", color="Level Risiko", nbins=20, title="Sebaran Skor Risiko"), use_container_width=True)
+                    st.plotly_chart(style_fig(px.histogram(df_res, x="Skor Risiko", color="Level Risiko", nbins=20, title="Sebaran Skor Risiko", color_discrete_map=RISK_COLORS)), use_container_width=True)
                 with g2:
                     if all_flags:
                         fc = pd.Series(all_flags).value_counts().reset_index()
                         fc.columns = ['Red Flag', 'Jumlah']
-                        st.plotly_chart(px.bar(fc, x='Jumlah', y='Red Flag', orientation='h', title="Frekuensi Red Flag"), use_container_width=True)
+                        st.plotly_chart(style_fig(px.bar(fc, x='Jumlah', y='Red Flag', orientation='h', title="Frekuensi Red Flag", color_discrete_sequence=["#1D4ED8"])), use_container_width=True)
                 if df_benford is not None:
                     fb = go.Figure()
-                    fb.add_trace(go.Bar(x=df_benford['Digit'], y=df_benford['Aktual (%)'], name='Aktual (%)'))
-                    fb.add_trace(go.Scatter(x=df_benford['Digit'], y=df_benford['Benford (%)'], name='Benford (%)', mode='lines+markers'))
+                    fb.add_trace(go.Bar(x=df_benford['Digit'], y=df_benford['Aktual (%)'], name='Aktual (%)', marker_color="#1D4ED8"))
+                    fb.add_trace(go.Scatter(x=df_benford['Digit'], y=df_benford['Benford (%)'], name='Benford (%)', mode='lines+markers', line=dict(color="#F5A524", width=3)))
                     fb.update_layout(title="Uji Benford's Law")
-                    st.plotly_chart(fb, use_container_width=True)
+                    st.plotly_chart(style_fig(fb), use_container_width=True)
 
             with t2:
                 lvl_filter = st.multiselect("Filter Level Risiko", ['Tinggi', 'Sedang', 'Rendah'], default=['Tinggi', 'Sedang'])
@@ -590,7 +909,7 @@ if uploaded_file is not None:
             t1, t2, t3, t4 = st.tabs(["📊 Grafik & Struktur", "📋 Tabel Akun", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
-                st.plotly_chart(px.bar(df_fs.head(15), x=col_akun, y=['Nilai_Kini', 'Nilai_Lalu'], barmode='group', title="Top 15 Akun: Periode Berjalan vs Periode Lalu"), use_container_width=True)
+                st.plotly_chart(style_fig(px.bar(df_fs.head(15), x=col_akun, y=['Nilai_Kini', 'Nilai_Lalu'], barmode='group', title="Top 15 Akun: Periode Berjalan vs Periode Lalu", color_discrete_sequence=["#1D4ED8", "#2DD4BF"])), use_container_width=True)
                 if 'by_cat' in info_fs:
                     st.dataframe(info_fs['by_cat'].reset_index(), use_container_width=True, hide_index=True)
 
@@ -631,7 +950,7 @@ if uploaded_file is not None:
             t1, t2, t3, t4 = st.tabs(["📊 Grafik Penyerapan", "📋 Tabel Anggaran", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
-                st.plotly_chart(px.bar(df_bud.head(15), x=col_pos, y='Penyerapan_%', color='Level Risiko', title="Persentase Penyerapan Anggaran (Top 15)"), use_container_width=True)
+                st.plotly_chart(style_fig(px.bar(df_bud.head(15), x=col_pos, y='Penyerapan_%', color='Level Risiko', title="Persentase Penyerapan Anggaran (Top 15)", color_discrete_map=RISK_COLORS)), use_container_width=True)
 
             with t2:
                 b_cols = ['Baris Excel', col_pos, 'Pagu_Clean', 'Real_Clean', 'Selisih_Anggaran', 'Penyerapan_%', 'Skor Risiko', 'Level Risiko', 'Temuan Anggaran']
@@ -718,3 +1037,15 @@ Cuplikan 15 Baris Prioritas:
         st.error(f"Terjadi kesalahan saat membaca file: {e}")
 else:
     st.info("Silakan unggah file Excel (.xlsx) milik Anda. Setelah file terunggah, Anda bisa memilih sheet dan mencocokkan kolomnya secara langsung.")
+    st.markdown("""
+    <div class="feature-grid">
+      <div class="feature-card"><div class="ico">💳</div><h4>Transaksi & Pembayaran</h4>
+        <p>Deteksi duplikasi faktur, split transaction, self-approval, dan anomali nominal dengan Isolation Forest serta Hukum Benford.</p></div>
+      <div class="feature-card"><div class="ico">📈</div><h4>Neraca & Laba Rugi</h4>
+        <p>Tinjau lonjakan akun, konsentrasi nilai, saldo tidak lazim, dan keseimbangan Aset terhadap Liabilitas + Ekuitas.</p></div>
+      <div class="feature-card"><div class="ico">🧾</div><h4>Anggaran vs Realisasi</h4>
+        <p>Temukan pos yang melampaui pagu, realisasi tanpa anggaran, serta penyerapan yang terlalu rendah atau terlalu pas.</p></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+st.markdown('<div class="app-footer">AuditInsight • Hasil analisis berupa indikasi risiko dan perlu diverifikasi auditor</div>', unsafe_allow_html=True)
