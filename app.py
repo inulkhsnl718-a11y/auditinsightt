@@ -221,8 +221,6 @@ section[data-testid="stSidebar"] {
         linear-gradient(165deg, #09152E 0%, #102750 58%, #0B3C4B 100%);
 }
 .brand { padding: .65rem .55rem 1rem; }
-.brand svg { filter: drop-shadow(0 3px 8px rgba(231,196,111,.38)); }
-.brand svg rect { stroke: rgba(255,247,232,.35); stroke-width: .6; }
 .brand b { letter-spacing: -.045em; }
 .brand span { letter-spacing: .025em; }
 div[data-testid="stMetric"] {
@@ -337,47 +335,14 @@ section[data-testid="stSidebar"] input { color: #F8F4ED !important; }
     animation: none !important; transition: transform .18s ease, filter .18s ease;
 }
 .stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); filter: brightness(1.06); }
-.stTabs [data-baseweb="tab-list"] {
-    display: flex; flex-wrap: wrap; gap: .35rem;
-    background: rgba(255,255,255,.42); border: 0;
-    border-bottom: 1px solid rgba(116,59,73,.16);
-    border-radius: 0; padding: .15rem .2rem 0;
-    box-shadow: none;
-}
-.stTabs [data-baseweb="tab"] {
-    position: relative; background: transparent !important;
-    border: 0 !important; border-radius: 10px 10px 0 0 !important;
-    padding: .72rem 1rem .85rem !important; min-height: 46px;
-    transition: color .22s ease, background .22s ease, transform .22s ease;
-}
-.stTabs [data-baseweb="tab"] p { color: #66565A !important; font-weight: 600; }
-.stTabs [data-baseweb="tab"]:hover {
-    background: linear-gradient(120deg,rgba(116,59,73,.08),rgba(120,128,74,.10)) !important;
-    transform: translateY(-2px);
-}
-.stTabs [data-baseweb="tab"][aria-selected="true"] {
-    background: linear-gradient(110deg,rgba(116,59,73,.10),rgba(120,128,74,.12)) !important;
-    box-shadow: none !important;
-}
-.stTabs [data-baseweb="tab"][aria-selected="true"] p { color: #743B49 !important; }
-.stTabs [data-baseweb="tab"][aria-selected="true"]::after {
-    content: ""; position: absolute; left: 10%; right: 10%; bottom: 0;
-    height: 3px; border-radius: 4px 4px 0 0;
-    background: linear-gradient(90deg,#743B49,#A66B5D,#78804A);
-    background-size: 180% 100%; animation: tabGlow 3.5s ease-in-out infinite;
-}
-.stTabs [data-baseweb="tab-highlight"], .stTabs [data-baseweb="tab-border"] { display: none !important; }
-@keyframes tabGlow { 0%,100% { background-position: 0% 50%; opacity: .88; } 50% { background-position: 100% 50%; opacity: 1; } }
-.stTabs [data-baseweb="tab-panel"] { animation: tabContentIn .32s ease both; }
-@keyframes tabContentIn { from { opacity: .45; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+.stTabs [data-baseweb="tab-list"] { background: rgba(255,255,255,.68); border: 1px solid rgba(116,59,73,.12); }
+.stTabs [aria-selected="true"] { background: linear-gradient(120deg,#743B49,#78804A) !important; box-shadow: none !important; }
+.stTabs [data-baseweb="tab"]:hover { background: rgba(120,128,74,.10); }
 div[data-testid="stMetric"] { background: rgba(255,255,255,.84); border: 1px solid rgba(116,59,73,.12); box-shadow: 0 10px 24px rgba(64,47,42,.06); }
 [data-testid="stDataFrame"], [data-testid="stTable"] { border: 1px solid rgba(116,59,73,.12); border-radius: 12px; }
 .feature-card { background: rgba(255,255,255,.86); border-color: rgba(116,59,73,.13); }
 hr { background: linear-gradient(90deg,transparent,rgba(120,128,74,.35),transparent) !important; }
 .app-footer { border-color: rgba(116,59,73,.14); color: #7A6D68; }
-.stTabs [data-baseweb="tab"]:focus-visible { outline: 2px solid #78804A; outline-offset: 2px; }
-.stTabs [data-baseweb="tab"] p { white-space: nowrap; }
-@media (max-width: 760px) { .stTabs [data-baseweb="tab-list"] { gap: .1rem; } .stTabs [data-baseweb="tab"] { padding: .6rem .65rem .75rem !important; } }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -584,142 +549,9 @@ def benford_analysis(amounts):
     return df_benford, anomalous_digits
 
 def to_excel_bytes(df_export, sheet_name="Hasil_Audit"):
-    """Membuat kertas kerja Excel yang rapi, siap dibaca, dan mudah difilter."""
-    from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
-    from openpyxl.utils import get_column_letter
-    from openpyxl.worksheet.table import Table, TableStyleInfo
-    from openpyxl.formatting.rule import CellIsRule
-    from datetime import datetime
-
     output = BytesIO()
-    df = df_export.copy()
-    df = df.replace({np.nan: None})
-
-    # Nama sheet Excel maksimal 31 karakter dan tidak boleh memuat karakter khusus.
-    safe_sheet = re.sub(r'[\[\]\:\*\?\/\\]', '_', str(sheet_name))[:31] or "Hasil_Audit"
-
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=safe_sheet, startrow=4)
-        ws = writer.sheets[safe_sheet]
-
-        maroon = "743B49"
-        olive = "78804A"
-        cream = "F7F3EA"
-        pale_olive = "EEF0E4"
-        pale_maroon = "F4EAEC"
-        ink = "38252A"
-        white = "FFFFFF"
-        thin = Side(style="thin", color="E5DED5")
-
-        # Header laporan.
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(1, len(df.columns)))
-        title = ws.cell(1, 1, f"AUDITINSIGHT | {safe_sheet.replace('_', ' ').upper()}")
-        title.font = Font(name="Aptos Display", size=16, bold=True, color=white)
-        title.fill = PatternFill("solid", fgColor=maroon)
-        title.alignment = Alignment(vertical="center", horizontal="left")
-        ws.row_dimensions[1].height = 32
-
-        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=max(1, len(df.columns)))
-        subtitle = ws.cell(2, 1, "Kertas Kerja Hasil Analisis Audit • Dibuat otomatis oleh AuditInsight")
-        subtitle.font = Font(name="Aptos", size=10, italic=True, color="665B55")
-        subtitle.fill = PatternFill("solid", fgColor=cream)
-        subtitle.alignment = Alignment(vertical="center")
-        ws.row_dimensions[2].height = 22
-
-        ws.merge_cells(start_row=3, start_column=1, end_row=3, end_column=max(1, len(df.columns)))
-        stamp = ws.cell(3, 1, f"Tanggal ekspor: {datetime.now().strftime('%d %B %Y, %H:%M')}")
-        stamp.font = Font(name="Aptos", size=9, color="74686A")
-        stamp.alignment = Alignment(vertical="center")
-        ws.row_dimensions[3].height = 20
-
-        # Format header tabel.
-        header_row = 5
-        for cell in ws[header_row]:
-            cell.fill = PatternFill("solid", fgColor=olive)
-            cell.font = Font(name="Aptos", size=10, bold=True, color=white)
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = Border(bottom=Side(style="medium", color=maroon))
-        ws.row_dimensions[header_row].height = 32
-
-        # Format isi, zebra striping, angka, dan teks panjang.
-        headers = [str(c.value or "") for c in ws[header_row]]
-        for row in ws.iter_rows(min_row=header_row + 1, max_row=ws.max_row):
-            for cell in row:
-                cell.font = Font(name="Aptos", size=10, color=ink)
-                cell.alignment = Alignment(vertical="top", wrap_text=True)
-                cell.border = Border(bottom=thin)
-                if cell.row % 2 == 0:
-                    cell.fill = PatternFill("solid", fgColor="FAF8F4")
-
-                header = headers[cell.column - 1].lower()
-                if any(key in header for key in ("pagu", "realisasi", "jumlah", "nilai", "selisih", "saldo", "rupiah", "_rp")):
-                    if isinstance(cell.value, (int, float)):
-                        cell.number_format = '"Rp" #,##0;[Red]("Rp" #,##0);-'
-                        cell.alignment = Alignment(horizontal="right", vertical="top")
-                elif "%" in header or "persentase" in header or "perubahan_" in header:
-                    if isinstance(cell.value, (int, float)):
-                        cell.number_format = '0.00"%"'
-                        cell.alignment = Alignment(horizontal="right", vertical="top")
-
-                if any(key in header for key in ("catatan", "temuan", "alasan", "anomali", "red flag")):
-                    cell.alignment = Alignment(vertical="top", wrap_text=True)
-
-        # Highlight status risiko / review.
-        for idx, header in enumerate(headers, start=1):
-            h = header.lower()
-            if "level risiko" in h or "status review" in h:
-                for r in range(header_row + 1, ws.max_row + 1):
-                    cell = ws.cell(r, idx)
-                    value = str(cell.value or "").lower()
-                    if "tinggi" in value or "diperiksa" in value:
-                        cell.fill = PatternFill("solid", fgColor=pale_maroon)
-                        cell.font = Font(name="Aptos", size=10, bold=True, color=maroon)
-                    elif "sedang" in value:
-                        cell.fill = PatternFill("solid", fgColor="F8F0DF")
-                        cell.font = Font(name="Aptos", size=10, bold=True, color="8A642A")
-                    elif "rendah" in value or "sesuai" in value:
-                        cell.fill = PatternFill("solid", fgColor=pale_olive)
-                        cell.font = Font(name="Aptos", size=10, bold=True, color=olive)
-
-        # Lebar kolom yang proporsional.
-        for col_idx, header in enumerate(headers, start=1):
-            letter = get_column_letter(col_idx)
-            values = [str(ws.cell(r, col_idx).value or "") for r in range(header_row, min(ws.max_row, header_row + 100) + 1)]
-            best = max([len(v) for v in values] + [len(str(header))])
-            width = min(max(best + 3, 13), 42)
-            if any(k in header.lower() for k in ("catatan", "temuan", "alasan", "anomali", "red flag")):
-                width = max(width, 30)
-            ws.column_dimensions[letter].width = width
-
-        ws.freeze_panes = "A6"
-        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(max(1, len(headers)))}{ws.max_row}"
-        ws.sheet_view.showGridLines = False
-        ws.sheet_properties.tabColor = maroon
-        ws.sheet_format.defaultRowHeight = 21
-        ws.print_title_rows = "1:5"
-        ws.sheet_properties.pageSetUpPr.fitToPage = True
-        ws.page_setup.fitToWidth = 1
-        ws.page_setup.fitToHeight = 0
-        ws.page_setup.orientation = "landscape"
-        ws.page_margins.left = 0.25
-        ws.page_margins.right = 0.25
-        ws.page_margins.top = 0.5
-        ws.page_margins.bottom = 0.5
-
-        # Tabel Excel asli agar filter dan banded rows tetap nyaman digunakan.
-        if len(df.columns) > 0 and len(df) > 0:
-            ref = f"A{header_row}:{get_column_letter(len(df.columns))}{ws.max_row}"
-            table = Table(displayName=f"AuditTable{len(df.columns)}{len(df)}", ref=ref)
-            table.tableStyleInfo = TableStyleInfo(
-                name="TableStyleMedium4", showFirstColumn=False,
-                showLastColumn=False, showRowStripes=True, showColumnStripes=False
-            )
-            ws.add_table(table)
-
-        writer.book.properties.title = f"AuditInsight - {safe_sheet}"
-        writer.book.properties.subject = "Kertas kerja hasil analisis audit"
-        writer.book.properties.creator = "AuditInsight"
-
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
 @st.cache_data(ttl=900, show_spinner=False)
@@ -1116,15 +948,14 @@ with st.sidebar:
     <div class="brand">
       <svg width="52" height="52" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <linearGradient id="g1" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#FFF1C7"/><stop offset="1" stop-color="#D6B66B"/></linearGradient>
-          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="64"><stop stop-color="#A8B06B"/><stop offset="1" stop-color="#E2C77C"/></linearGradient>
+          <linearGradient id="g1" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#B7A66A"/><stop offset="1" stop-color="#78804A"/></linearGradient>
+          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="64"><stop stop-color="#743B49"/><stop offset="1" stop-color="#78804A"/></linearGradient>
         </defs>
         <rect x="6" y="34" width="9" height="20" rx="2.5" fill="url(#g2)"/>
         <rect x="19" y="24" width="9" height="30" rx="2.5" fill="url(#g2)"/>
         <rect x="32" y="29" width="9" height="25" rx="2.5" fill="url(#g2)"/>
-        <circle cx="42" cy="22" r="13" stroke="#FFF7E8" stroke-width="5.5"/>
-        <circle cx="42" cy="22" r="8.5" fill="#743B49" opacity=".92"/>
-        <path d="M51.5 31.5L59 39" stroke="#E7C46F" stroke-width="6" stroke-linecap="round"/>
+        <circle cx="42" cy="22" r="13" stroke="url(#g1)" stroke-width="5"/>
+        <path d="M51.5 31.5L59 39" stroke="#FBBF24" stroke-width="5.5" stroke-linecap="round"/>
       </svg>
       <div><b>AuditInsight</b><span>Platform audit multi-modul</span></div>
     </div>
