@@ -34,7 +34,7 @@ CUSTOM_CSS = """
     --ink-2: #12285A;
     --blue: #1D4ED8;
     --teal: #0D9488;
-    --cyan: #22D3EE;
+    --cyan: #B7A66A;
     --amber: #F5A524;
     --muted: #5B6B86;
     --line: rgba(29, 78, 216, .14);
@@ -62,10 +62,10 @@ footer { visibility: hidden; }
 
 /* ---------- Sidebar ---------- */
 section[data-testid="stSidebar"] {
-    background: linear-gradient(185deg, #081530 0%, #0E2250 55%, #0A3A4A 100%);
+    background: linear-gradient(180deg, #482A33 0%, #603B43 58%, #59613A 100%);
     border-right: 1px solid rgba(255, 255, 255, .07);
 }
-section[data-testid="stSidebar"] * { color: #DCE6F7; }
+section[data-testid="stSidebar"] * { color: #F3EDE2; }
 section[data-testid="stSidebar"] h1,
 section[data-testid="stSidebar"] h2,
 section[data-testid="stSidebar"] h3 { color: #FFFFFF; }
@@ -310,6 +310,39 @@ section[data-testid="stFileUploaderDropzone"] {
     .feature-grid { grid-template-columns: 1fr; }
 }
 
+/* ---------- Tema marun & zaitun: hangat, natural, dan kontras nyaman ---------- */
+:root {
+    --ink: #38252A; --ink-2: #56343D; --blue: #743B49; --teal: #78804A;
+    --cyan: #B7A66A; --amber: #B68A4B; --muted: #74686A; --line: rgba(116,59,73,.16);
+}
+.stApp {
+    background: radial-gradient(900px 500px at 96% 0%, rgba(120,128,74,.12), transparent 62%),
+                radial-gradient(850px 500px at 0% 10%, rgba(116,59,73,.08), transparent 58%),
+                linear-gradient(180deg,#FAF8F4 0%,#F2EFE8 100%);
+    color: #382F2E;
+}
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg,#482A33 0%,#603B43 58%,#59613A 100%);
+}
+section[data-testid="stSidebar"] * { color: #F8F4ED; }
+section[data-testid="stSidebar"] [data-testid="stRadio"] label,
+section[data-testid="stSidebar"] input { color: #F8F4ED !important; }
+::-webkit-scrollbar-thumb { background: linear-gradient(180deg,#743B49,#78804A); }
+.stButton > button, .stDownloadButton > button {
+    background: linear-gradient(120deg,#743B49,#78804A) !important;
+    border: 1px solid rgba(255,255,255,.28) !important; color: #fff !important;
+    box-shadow: 0 7px 18px rgba(82,57,54,.13) !important;
+    animation: none !important; transition: transform .18s ease, filter .18s ease;
+}
+.stButton > button:hover, .stDownloadButton > button:hover { transform: translateY(-1px); filter: brightness(1.06); }
+.stTabs [data-baseweb="tab-list"] { background: rgba(255,255,255,.68); border: 1px solid rgba(116,59,73,.12); }
+.stTabs [aria-selected="true"] { background: linear-gradient(120deg,#743B49,#78804A) !important; box-shadow: none !important; }
+.stTabs [data-baseweb="tab"]:hover { background: rgba(120,128,74,.10); }
+div[data-testid="stMetric"] { background: rgba(255,255,255,.84); border: 1px solid rgba(116,59,73,.12); box-shadow: 0 10px 24px rgba(64,47,42,.06); }
+[data-testid="stDataFrame"], [data-testid="stTable"] { border: 1px solid rgba(116,59,73,.12); border-radius: 12px; }
+.feature-card { background: rgba(255,255,255,.86); border-color: rgba(116,59,73,.13); }
+hr { background: linear-gradient(90deg,transparent,rgba(120,128,74,.35),transparent) !important; }
+.app-footer { border-color: rgba(116,59,73,.14); color: #7A6D68; }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -320,24 +353,24 @@ HERO_HTML = """<!DOCTYPE html><html><head><meta charset="utf-8">
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{background:transparent;font-family:'Inter',sans-serif;overflow:hidden}
 .hero{position:relative;height:310px;border-radius:24px;overflow:hidden;
- background:radial-gradient(760px 380px at 82% 10%,rgba(34,211,238,.38),transparent 60%),
- radial-gradient(620px 360px at 0% 100%,rgba(29,78,216,.55),transparent 60%),
- linear-gradient(135deg,#071229,#0E2250 58%,#0A3A4A);
+ background:radial-gradient(760px 380px at 82% 10%,rgba(183,166,106,.30),transparent 60%),
+ radial-gradient(620px 360px at 0% 100%,rgba(120,128,74,.30),transparent 60%),
+ linear-gradient(135deg,#38252A,#56343D 58%,#59613A);
  box-shadow:0 28px 60px -26px rgba(7,18,41,.8)}
 .grid{position:absolute;inset:0;opacity:.7;
  background-image:linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.05) 1px,transparent 1px);
  background-size:38px 38px;-webkit-mask-image:linear-gradient(100deg,transparent 10%,#000 60%);mask-image:linear-gradient(100deg,transparent 10%,#000 60%)}
 canvas{position:absolute;inset:0;width:100%;height:100%}
 .copy{position:relative;z-index:2;padding:40px 46px;max-width:60%;animation:in .9s ease both}
-.badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#9FE7F2;
- background:rgba(34,211,238,.12);border:1px solid rgba(34,211,238,.35);padding:6px 12px;border-radius:99px}
-.badge i{width:8px;height:8px;border-radius:50%;background:#22D3EE;box-shadow:0 0 0 0 rgba(34,211,238,.7);animation:pulse 2s infinite}
+.badge{display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:600;color:#E9DDBB;
+ background:rgba(120,128,74,.16);border:1px solid rgba(183,166,106,.35);padding:6px 12px;border-radius:99px}
+.badge i{width:8px;height:8px;border-radius:50%;background:#B7A66A;box-shadow:0 0 0 0 rgba(34,211,238,.7);animation:pulse 2s infinite}
 h1{margin:16px 0 10px;font-family:'Space Grotesk',sans-serif;font-size:46px;line-height:1.05;color:#fff;letter-spacing:-.02em}
-h1 span{background:linear-gradient(90deg,#7DD3FC,#5EEAD4);-webkit-background-clip:text;background-clip:text;color:transparent}
+h1 span{background:linear-gradient(90deg,#D7C69B,#B6B98A);-webkit-background-clip:text;background-clip:text;color:transparent}
 p{color:#B9C9E6;font-size:15px;line-height:1.6;max-width:560px}
 p b{color:#fff}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
-.chips em{font-style:normal;font-size:12px;font-weight:500;color:#DCE6F7;padding:5px 11px;border-radius:8px;
+.chips em{font-style:normal;font-size:12px;font-weight:500;color:#F3EDE2;padding:5px 11px;border-radius:8px;
  background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)}
 #fb{display:none;position:absolute;right:14%;top:50%;margin-top:-70px;width:140px;height:140px;perspective:700px}
 .cube{width:100%;height:100%;position:relative;transform-style:preserve-3d;animation:spin 12s linear infinite}
@@ -437,11 +470,11 @@ def style_fig(fig):
         template="plotly_white",
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="Inter, sans-serif", color="#334155"),
-        title=dict(font=dict(size=16, color="#0B1B3A")),
+        font=dict(family="Inter, sans-serif", color="#514446"),
+        title=dict(font=dict(size=16, color="#56343D")),
         margin=dict(l=20, r=20, t=60, b=20),
         legend=dict(bgcolor="rgba(255,255,255,0)"),
-        hoverlabel=dict(bgcolor="#0B1B3A", font_color="#FFFFFF"),
+        hoverlabel=dict(bgcolor="#56343D", font_color="#FFFFFF"),
     )
     fig.update_xaxes(gridcolor="rgba(148,163,184,.25)", zeroline=False)
     fig.update_yaxes(gridcolor="rgba(148,163,184,.25)", zeroline=False)
@@ -521,26 +554,26 @@ def to_excel_bytes(df_export, sheet_name="Hasil_Audit"):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
+@st.cache_data(ttl=900, show_spinner=False)
 def get_available_gemini_models(api_key):
-    """Ambil model yang benar-benar tersedia untuk API key dan mendukung generateContent."""
-    client = genai.Client(api_key=api_key)
+    """Ambil model teks yang benar-benar tersedia untuk API key; cache 15 menit."""
+    if not api_key or not api_key.strip():
+        return []
+    client = genai.Client(api_key=api_key.strip())
     available = []
     for model in client.models.list():
         actions = getattr(model, "supported_actions", None) or []
-        if "generateContent" not in actions:
-            continue
         name = (getattr(model, "name", "") or "").replace("models/", "").strip()
-        if name:
+        low = name.lower()
+        # Hanya model Gemini untuk teks; hindari model image/audio/live dan model lama
+        # gemini-2.5-pro yang pada akun pengguna memunculkan 404.
+        excluded = any(x in low for x in ("image", "audio", "live", "tts", "transcrib", "embedding"))
+        if "generateContent" in actions and low.startswith("gemini-") and not excluded and low != "gemini-2.5-pro":
             available.append(name)
-
-    # Model yang lebih baru ditampilkan lebih dahulu jika tersedia.
     priority = [
-        "gemini-3.8-flash",
-        "gemini-3.7-flash",
-        "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
+        "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
+        "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-flash-lite",
+        "gemini-2.5-flash", "gemini-2.5-flash-lite"
     ]
     ordered = [name for name in priority if name in available]
     ordered.extend(sorted(name for name in available if name not in ordered))
@@ -548,7 +581,7 @@ def get_available_gemini_models(api_key):
 
 
 def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=2):
-    """Kirim pertanyaan ke Gemini; hindari retry berulang untuk model yang tidak ditemukan."""
+    """Kirim pertanyaan ke Gemini dan otomatis pindah model bila model pilihan 404."""
     if not api_key or not api_key.strip():
         raise ValueError("API key Gemini belum diisi.")
 
@@ -556,28 +589,25 @@ def get_gemini_response(api_key, model_name, system_instruction, messages, max_r
     contents = []
     for message in messages:
         role = "user" if message.get("role") == "user" else "model"
-        contents.append(
-            types.Content(
-                role=role,
-                parts=[types.Part.from_text(text=str(message.get("content", "")))]
-            )
-        )
-
-    # Coba model pilihan terlebih dahulu, lalu model aktif lain yang mendukung generateContent.
-    candidates = []
-    if model_name:
-        candidates.append(model_name.replace("models/", "").strip())
+        contents.append(types.Content(role=role, parts=[types.Part.from_text(text=str(message.get("content", "")))]))
 
     try:
-        for available_name in get_available_gemini_models(api_key):
-            if available_name not in candidates:
-                candidates.append(available_name)
+        available = get_available_gemini_models(api_key)
     except Exception:
-        # Jika endpoint daftar model tidak tersedia, tetap uji model pilihan.
-        pass
+        available = []
 
-    if not candidates:
-        candidates = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
+    candidates = []
+    # Model pilihan hanya dicoba jika memang tercantum di daftar model aktif.
+    selected = (model_name or "").replace("models/", "").strip()
+    if selected and (not available or selected in available) and selected != "gemini-2.5-pro":
+        candidates.append(selected)
+    for name in available:
+        if name not in candidates:
+            candidates.append(name)
+    # Fallback versi Flash yang masih didukung dokumentasi; tetap lanjut bila 404.
+    for name in ("gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.5-flash"):
+        if name not in candidates:
+            candidates.append(name)
 
     last_error = None
     for current_model in candidates:
@@ -588,21 +618,24 @@ def get_gemini_response(api_key, model_name, system_instruction, messages, max_r
                     contents=contents,
                     config=types.GenerateContentConfig(
                         system_instruction=system_instruction,
-                        temperature=0.3,
-                        max_output_tokens=1600
+                        temperature=0.25,
+                        max_output_tokens=4096
                     )
                 )
                 answer = getattr(response, "text", None)
                 if answer and answer.strip():
-                    return answer.strip()
-                raise RuntimeError("Gemini berhasil dihubungi, tetapi tidak menghasilkan teks.")
+                    cleaned = answer.strip()
+                    # Cegah jawaban satu-dua kalimat yang jelas terpotong agar tidak
+                    # dianggap sebagai jawaban sukses; pengguna akan menerima panduan lengkap.
+                    if len(cleaned) < 180 or cleaned.rstrip().endswith((":", "...", "…")):
+                        raise RuntimeError("Jawaban Gemini terindikasi belum lengkap.")
+                    return cleaned
+                raise RuntimeError("Gemini tidak mengembalikan teks jawaban.")
             except Exception as error:
                 last_error = error
                 error_text = str(error).lower()
                 is_not_found = "404" in error_text or "not_found" in error_text or "not found" in error_text
-                is_temporary = any(token in error_text for token in ("503", "unavailable", "429", "resource_exhausted"))
-
-                # Model yang tidak ditemukan tidak perlu dicoba ulang; lanjut ke model lain.
+                is_temporary = any(token in error_text for token in ("503", "unavailable", "429", "resource_exhausted", "jawaban gemini terindikasi"))
                 if is_not_found:
                     break
                 if is_temporary and attempt < max_retries - 1:
@@ -611,8 +644,8 @@ def get_gemini_response(api_key, model_name, system_instruction, messages, max_r
                 break
 
     raise RuntimeError(
-        "Semua model Gemini yang dicoba gagal. Periksa status API key, akses model, "
-        "pembatasan API key, dan kuota Gemini. Detail teknis: " + str(last_error)
+        "Gemini tidak berhasil menghasilkan jawaban lengkap. Periksa API key, kuota, dan akses model. Detail teknis: "
+        + str(last_error)
     )
 
 def get_preset_audit_answer(question_key, mode_name, ai_context_summary, top_str):
@@ -622,7 +655,9 @@ def get_preset_audit_answer(question_key, mode_name, ai_context_summary, top_str
             header
             + "1. **Indikasi Risiko / Anomali Utama:** Fokuskan pemeriksaan pada baris dengan skor risiko tertinggi dan nilai/perubahan paling mencolok pada cuplikan prioritas di bawah.\n"
             + "2. **Kemungkinan Penyebab Non-Fraud:** Kesalahan input/format angka, klasifikasi akun atau pos yang kurang tepat, perbedaan waktu pencatatan (*cut-off*), atau kondisi operasional yang memang sah.\n"
-            + "3. **Prosedur Audit Lanjutan:** Bandingkan baris prioritas dengan dokumen pendukung asli, konfirmasi ke unit/bagian terkait, lalu catat hasil verifikasi pada kolom *Keputusan Auditor* di kertas kerja Excel.\n\n"
+            + "3. **Prosedur Audit Lanjutan:** Bandingkan baris prioritas dengan dokumen pendukung asli, konfirmasi ke unit/bagian terkait, lalu catat hasil verifikasi pada kolom *Keputusan Auditor* di kertas kerja Excel.\n"
+            + "4. **Batasan Kesimpulan:** Nilai yang melewati pagu atau pola yang tidak biasa belum membuktikan penyimpangan. Auditor perlu memeriksa dasar perubahan anggaran, otorisasi, bukti realisasi, dan kesesuaian periode sebelum menetapkan temuan.\n\n"
+            + "**Cuplikan Data Prioritas untuk Ditelusuri**\n\n"
             + f"```\n{top_str}\n```"
         )
     elif question_key == "Prosedur Verifikasi Dokumen & Bukti Pendukung":
@@ -913,8 +948,8 @@ with st.sidebar:
     <div class="brand">
       <svg width="52" height="52" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
-          <linearGradient id="g1" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#38BDF8"/><stop offset="1" stop-color="#14B8A6"/></linearGradient>
-          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="64"><stop stop-color="#1D4ED8"/><stop offset="1" stop-color="#0D9488"/></linearGradient>
+          <linearGradient id="g1" x1="0" y1="0" x2="64" y2="64"><stop stop-color="#B7A66A"/><stop offset="1" stop-color="#78804A"/></linearGradient>
+          <linearGradient id="g2" x1="0" y1="0" x2="0" y2="64"><stop stop-color="#743B49"/><stop offset="1" stop-color="#78804A"/></linearGradient>
         </defs>
         <rect x="6" y="34" width="9" height="20" rx="2.5" fill="url(#g2)"/>
         <rect x="19" y="24" width="9" height="30" rx="2.5" fill="url(#g2)"/>
@@ -953,8 +988,9 @@ with st.sidebar:
     gemini_api_key = st.text_input("Gemini API Key", value=default_api_key, type="password")
     fallback_model_options = [
         "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.6-flash",
         "gemini-3.5-flash",
-        "gemini-3.1-flash-lite",
     ]
     if gemini_api_key.strip():
         try:
@@ -1039,10 +1075,10 @@ if uploaded_file is not None:
                     if all_flags:
                         fc = pd.Series(all_flags).value_counts().reset_index()
                         fc.columns = ['Red Flag', 'Jumlah']
-                        st.plotly_chart(style_fig(px.bar(fc, x='Jumlah', y='Red Flag', orientation='h', title="Frekuensi Red Flag", color_discrete_sequence=["#1D4ED8"])), use_container_width=True)
+                        st.plotly_chart(style_fig(px.bar(fc, x='Jumlah', y='Red Flag', orientation='h', title="Frekuensi Red Flag", color_discrete_sequence=["#743B49"])), use_container_width=True)
                 if df_benford is not None:
                     fb = go.Figure()
-                    fb.add_trace(go.Bar(x=df_benford['Digit'], y=df_benford['Aktual (%)'], name='Aktual (%)', marker_color="#1D4ED8"))
+                    fb.add_trace(go.Bar(x=df_benford['Digit'], y=df_benford['Aktual (%)'], name='Aktual (%)', marker_color="#743B49"))
                     fb.add_trace(go.Scatter(x=df_benford['Digit'], y=df_benford['Benford (%)'], name='Benford (%)', mode='lines+markers', line=dict(color="#F5A524", width=3)))
                     fb.update_layout(title="Uji Benford's Law")
                     st.plotly_chart(style_fig(fb), use_container_width=True)
@@ -1091,7 +1127,7 @@ if uploaded_file is not None:
             t1, t2, t3, t4 = st.tabs(["📊 Grafik & Struktur", "📋 Tabel Akun", "🤖 Analisis & Pilihan Tanya Jawab", "📥 Unduh Excel"])
 
             with t1:
-                st.plotly_chart(style_fig(px.bar(df_fs.head(15), x=col_akun, y=['Nilai_Kini', 'Nilai_Lalu'], barmode='group', title="Top 15 Akun: Periode Berjalan vs Periode Lalu", color_discrete_sequence=["#1D4ED8", "#2DD4BF"])), use_container_width=True)
+                st.plotly_chart(style_fig(px.bar(df_fs.head(15), x=col_akun, y=['Nilai_Kini', 'Nilai_Lalu'], barmode='group', title="Top 15 Akun: Periode Berjalan vs Periode Lalu", color_discrete_sequence=["#743B49", "#78804A"])), use_container_width=True)
                 if 'by_cat' in info_fs:
                     st.dataframe(info_fs['by_cat'].reset_index(), use_container_width=True, hide_index=True)
 
@@ -1184,6 +1220,11 @@ Cuplikan 15 Baris Prioritas:
 {top_str}
 """
 
+            answer_context_key = f"{mode}|{uploaded_file.name}|{selected_q}"
+            if st.session_state.get("preset_answer_context") != answer_context_key:
+                st.session_state.pop("preset_answer", None)
+                st.session_state["preset_answer_context"] = answer_context_key
+
             if ask_instant_btn:
                 st.session_state["preset_answer"] = get_preset_audit_answer(
                     selected_q, mode, ai_context_summary, top_str
@@ -1202,9 +1243,10 @@ Cuplikan 15 Baris Prioritas:
                                 gemini_api_key,
                                 model_choice,
                                 system_prompt,
-                                [{"role": "user", "content": f"Jawab pertanyaan audit berikut secara ringkas, jelas, dan terstruktur: {selected_q}"}]
+                                [{"role": "user", "content": f"Jawab pertanyaan audit berikut secara lengkap (minimal 4 bagian dengan uraian yang jelas), spesifik berdasarkan angka dan cuplikan data, jangan berhenti di tengah kalimat: {selected_q}"}]
                             )
                             st.session_state["preset_answer"] = resp
+                            st.session_state["preset_answer_context"] = answer_context_key
                         except Exception as e:
                             error_text = str(e)
                             if "404" in error_text or "NOT_FOUND" in error_text.upper():
@@ -1218,7 +1260,7 @@ Cuplikan 15 Baris Prioritas:
                                     "masih aktif, dan memiliki izin untuk Gemini API."
                                 )
                             else:
-                                st.warning("Gemini belum dapat memberikan jawaban. Panduan instan ditampilkan sebagai cadangan.")
+                                st.warning("Gemini belum dapat memberikan jawaban lengkap. Panduan analisis berbasis data ditampilkan sebagai cadangan agar hasil tidak terpotong.")
                             st.session_state["preset_answer"] = get_preset_audit_answer(
                                 selected_q, mode, ai_context_summary, top_str
                             )
