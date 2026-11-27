@@ -17,7 +17,7 @@ from google.genai import types
 # 1. KONFIGURASI HALAMAN & TEMA VISUAL
 # ==========================================
 st.set_page_config(
-    page_title="AuditInsight - Multi-Module AI Audit",
+    page_title="AuditInsight | AI Audit Platform",
     page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -197,6 +197,119 @@ div[data-testid="stMetric"], .feature-card { animation: rise .6s ease both; }
 
 @media (max-width: 900px) { .feature-grid { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ---------- Penyempurnaan visual profesional ---------- */
+:root {
+    --ink: #101B35;
+    --ink-2: #172B55;
+    --blue: #3157D5;
+    --teal: #0E9F9A;
+    --cyan: #55D6E8;
+    --muted: #64748B;
+    --line: rgba(49, 87, 213, .13);
+}
+.stApp {
+    background:
+        radial-gradient(ellipse at 88% 0%, rgba(86, 210, 232, .18), transparent 34%),
+        radial-gradient(ellipse at 4% 18%, rgba(89, 120, 232, .11), transparent 30%),
+        linear-gradient(180deg, #F8FAFF 0%, #EEF3FB 55%, #F7F9FD 100%);
+}
+.block-container { max-width: 1440px; padding-top: 1.6rem; padding-bottom: 2.5rem; }
+section[data-testid="stSidebar"] {
+    background:
+        radial-gradient(circle at 12% 0%, rgba(57, 114, 221, .28), transparent 34%),
+        linear-gradient(165deg, #09152E 0%, #102750 58%, #0B3C4B 100%);
+}
+.brand { padding: .65rem .55rem 1rem; }
+.brand b { letter-spacing: -.045em; }
+.brand span { letter-spacing: .025em; }
+div[data-testid="stMetric"] {
+    border: 1px solid rgba(255,255,255,.92);
+    border-radius: 20px;
+    background: linear-gradient(145deg, rgba(255,255,255,.97), rgba(247,250,255,.88));
+    box-shadow: 0 15px 38px -25px rgba(18, 40, 82, .52), inset 0 1px 0 #fff;
+}
+div[data-testid="stMetric"]::before {
+    width: 4px;
+    background: linear-gradient(180deg, #4F73E6, #19B5AD, #62D5E5);
+}
+div[data-testid="stMetricValue"] { letter-spacing: -.045em; }
+.stTabs [data-baseweb="tab-list"] {
+    border: 1px solid rgba(49,87,213,.12);
+    box-shadow: 0 8px 25px -20px rgba(16, 27, 53, .55);
+}
+.stTabs [data-baseweb="tab"] { padding: .7rem 1.15rem; }
+.stButton > button, .stDownloadButton > button {
+    min-height: 2.7rem;
+    border-radius: 13px;
+    box-shadow: 0 5px 15px -13px rgba(16, 27, 53, .6);
+}
+.stButton > button[kind="primary"], .stButton > button[data-testid="stBaseButton-primary"] {
+    background: linear-gradient(115deg, #3157D5 0%, #176FBA 48%, #0E9F9A 100%);
+    box-shadow: 0 10px 24px -13px rgba(49, 87, 213, .85);
+}
+.stTextInput input, .stSelectbox [data-baseweb="select"] > div,
+.stNumberInput input, .stTextArea textarea {
+    border-radius: 12px !important;
+}
+div[data-testid="stExpander"] {
+    border: 1px solid rgba(49,87,213,.12);
+    border-radius: 18px;
+    background: rgba(255,255,255,.78);
+}
+div[data-testid="stDataFrame"], div[data-testid="stPlotlyChart"] {
+    border-radius: 18px;
+    border: 1px solid rgba(49,87,213,.11);
+    box-shadow: 0 14px 34px -25px rgba(16,27,53,.5);
+}
+section[data-testid="stFileUploaderDropzone"] {
+    border-radius: 20px;
+    border: 1.5px dashed rgba(49,87,213,.35);
+    background:
+        radial-gradient(circle at 90% 10%, rgba(85,214,232,.12), transparent 35%),
+        linear-gradient(135deg, rgba(255,255,255,.98), rgba(239,245,255,.9));
+}
+.feature-grid { gap: 1.25rem; margin-top: 1.7rem; }
+.feature-card {
+    position: relative;
+    min-height: 190px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,.95);
+    border-radius: 22px;
+    background:
+        radial-gradient(circle at 100% 0%, rgba(85,214,232,.13), transparent 38%),
+        linear-gradient(145deg, rgba(255,255,255,.98), rgba(244,248,255,.94));
+    box-shadow: 0 18px 42px -28px rgba(16,27,53,.58);
+}
+.feature-card::after {
+    content: "";
+    position: absolute;
+    width: 120px; height: 120px;
+    right: -54px; bottom: -62px;
+    border: 1px solid rgba(49,87,213,.12);
+    border-radius: 30px;
+    transform: rotate(35deg);
+    pointer-events: none;
+}
+.feature-card .ico {
+    width: 54px; height: 54px;
+    border-radius: 16px;
+    color: white;
+    background: linear-gradient(145deg, #4269E4, #0E9F9A);
+    box-shadow: 0 12px 25px -13px rgba(49,87,213,.85);
+}
+.feature-card h4 { letter-spacing: -.025em; }
+.feature-card p { line-height: 1.7; }
+.app-footer {
+    padding-top: 1rem;
+    border-top: 1px solid rgba(49,87,213,.1);
+    letter-spacing: .02em;
+}
+@media (max-width: 900px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .feature-grid { grid-template-columns: 1fr; }
+}
+
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -408,26 +521,66 @@ def to_excel_bytes(df_export, sheet_name="Hasil_Audit"):
         df_export.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=5):
+def get_available_gemini_models(api_key):
+    """Ambil model yang benar-benar tersedia untuk API key dan mendukung generateContent."""
     client = genai.Client(api_key=api_key)
+    available = []
+    for model in client.models.list():
+        actions = getattr(model, "supported_actions", None) or []
+        if "generateContent" not in actions:
+            continue
+        name = (getattr(model, "name", "") or "").replace("models/", "").strip()
+        if name:
+            available.append(name)
+
+    # Model yang lebih baru ditampilkan lebih dahulu jika tersedia.
+    priority = [
+        "gemini-3.8-flash",
+        "gemini-3.7-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+    ]
+    ordered = [name for name in priority if name in available]
+    ordered.extend(sorted(name for name in available if name not in ordered))
+    return ordered
+
+
+def get_gemini_response(api_key, model_name, system_instruction, messages, max_retries=2):
+    """Kirim pertanyaan ke Gemini; hindari retry berulang untuk model yang tidak ditemukan."""
+    if not api_key or not api_key.strip():
+        raise ValueError("API key Gemini belum diisi.")
+
+    client = genai.Client(api_key=api_key.strip())
     contents = []
-    for m in messages:
-        role = "user" if m["role"] == "user" else "model"
+    for message in messages:
+        role = "user" if message.get("role") == "user" else "model"
         contents.append(
             types.Content(
                 role=role,
-                parts=[types.Part.from_text(text=m["content"])]
+                parts=[types.Part.from_text(text=str(message.get("content", "")))]
             )
         )
 
-    fallback_models = [model_name, "gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro"]
-    models_to_try = []
-    for m_name in fallback_models:
-        if m_name not in models_to_try:
-            models_to_try.append(m_name)
+    # Coba model pilihan terlebih dahulu, lalu model aktif lain yang mendukung generateContent.
+    candidates = []
+    if model_name:
+        candidates.append(model_name.replace("models/", "").strip())
+
+    try:
+        for available_name in get_available_gemini_models(api_key):
+            if available_name not in candidates:
+                candidates.append(available_name)
+    except Exception:
+        # Jika endpoint daftar model tidak tersedia, tetap uji model pilihan.
+        pass
+
+    if not candidates:
+        candidates = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
 
     last_error = None
-    for current_model in models_to_try:
+    for current_model in candidates:
         for attempt in range(max_retries):
             try:
                 response = client.models.generate_content(
@@ -439,19 +592,28 @@ def get_gemini_response(api_key, model_name, system_instruction, messages, max_r
                         max_output_tokens=1600
                     )
                 )
-                return response.text or "Tidak ada respons teks yang dihasilkan oleh Gemini."
-            except Exception as e:
-                last_error = e
-                err_str = str(e)
-                is_temporary = ("503" in err_str) or ("UNAVAILABLE" in err_str) or ("429" in err_str)
-                is_not_found = ("404" in err_str) or ("NOT_FOUND" in err_str)
+                answer = getattr(response, "text", None)
+                if answer and answer.strip():
+                    return answer.strip()
+                raise RuntimeError("Gemini berhasil dihubungi, tetapi tidak menghasilkan teks.")
+            except Exception as error:
+                last_error = error
+                error_text = str(error).lower()
+                is_not_found = "404" in error_text or "not_found" in error_text or "not found" in error_text
+                is_temporary = any(token in error_text for token in ("503", "unavailable", "429", "resource_exhausted"))
+
+                # Model yang tidak ditemukan tidak perlu dicoba ulang; lanjut ke model lain.
                 if is_not_found:
                     break
                 if is_temporary and attempt < max_retries - 1:
-                    time.sleep(min(2 ** (attempt + 1), 16))
+                    time.sleep(2 ** (attempt + 1))
                     continue
                 break
-    raise last_error
+
+    raise RuntimeError(
+        "Semua model Gemini yang dicoba gagal. Periksa status API key, akses model, "
+        "pembatasan API key, dan kuota Gemini. Detail teknis: " + str(last_error)
+    )
 
 def get_preset_audit_answer(question_key, mode_name, ai_context_summary, top_str):
     header = f"**Analisis Terarah ({mode_name})**\n\n- **Ringkasan Data:** {ai_context_summary}\n\n"
@@ -789,10 +951,30 @@ with st.sidebar:
     st.subheader("Konfigurasi AI (Gemini)")
     default_api_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
     gemini_api_key = st.text_input("Gemini API Key", value=default_api_key, type="password")
+    fallback_model_options = [
+        "gemini-3.8-flash",
+        "gemini-3.5-flash",
+        "gemini-3.1-flash-lite",
+    ]
+    if gemini_api_key.strip():
+        try:
+            model_options = get_available_gemini_models(gemini_api_key)
+            if not model_options:
+                model_options = fallback_model_options
+                st.caption("Daftar model tidak mengembalikan model teks; memakai pilihan model standar.")
+        except Exception:
+            model_options = fallback_model_options
+            st.caption("Model tidak dapat dimuat otomatis. Pilihan standar ditampilkan.")
+    else:
+        model_options = fallback_model_options
+
+    preferred_model = "gemini-3.8-flash"
+    model_index = model_options.index(preferred_model) if preferred_model in model_options else 0
     model_choice = st.selectbox(
         "Model Gemini",
-        options=["gemini-3.8-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
-        index=0
+        options=model_options,
+        index=model_index,
+        help="Daftar model diambil dari model yang mendukung generateContent pada API key Anda."
     )
 
 # ==========================================
@@ -1024,7 +1206,19 @@ Cuplikan 15 Baris Prioritas:
                             )
                             st.session_state["preset_answer"] = resp
                         except Exception as e:
-                            st.warning(f"Gemini sedang sibuk ({e}). Menampilkan jawaban terstruktur otomatis:")
+                            error_text = str(e)
+                            if "404" in error_text or "NOT_FOUND" in error_text.upper():
+                                st.error(
+                                    "Model Gemini yang dipilih tidak ditemukan atau belum dapat diakses oleh API key ini. "
+                                    "Aplikasi sudah mencoba model lain yang tersedia. Periksa akses model dan API key Gemini."
+                                )
+                            elif "API key" in error_text.lower() or "permission" in error_text.lower() or "unauthorized" in error_text.lower():
+                                st.error(
+                                    "Gemini menolak autentikasi. Pastikan API key berasal dari Google AI Studio, "
+                                    "masih aktif, dan memiliki izin untuk Gemini API."
+                                )
+                            else:
+                                st.warning("Gemini belum dapat memberikan jawaban. Panduan instan ditampilkan sebagai cadangan.")
                             st.session_state["preset_answer"] = get_preset_audit_answer(
                                 selected_q, mode, ai_context_summary, top_str
                             )
